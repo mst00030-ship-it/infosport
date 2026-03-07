@@ -93,38 +93,81 @@
       <h1>InfoSport</h1>
     </div>
 
+    <!-- Role Switcher -->
+    <div class="role-switcher">
+      <button class="role-btn active" data-role="director" onclick="App.switchRole('director')">
+        <i class="fa-solid fa-briefcase"></i> Director
+      </button>
+      <button class="role-btn" data-role="jugador" onclick="App.switchRole('jugador')">
+        <i class="fa-solid fa-futbol"></i> Jugador
+      </button>
+    </div>
+
     <nav class="sidebar-nav">
-      <div class="nav-section-label">Principal</div>
-      <div class="nav-item active" data-view="dashboard">
-        <i class="fa-solid fa-gauge-high"></i>
-        <span>Dashboard</span>
-      </div>
-      <div class="nav-item" data-view="scouting">
-        <i class="fa-solid fa-binoculars"></i>
-        <span>Scouting Pro</span>
-        <span class="nav-badge" id="nav-badge-scouting">35</span>
+      <!-- Director Nav -->
+      <div id="nav-director">
+        <div class="nav-section-label">Principal</div>
+        <div class="nav-item active" data-view="dashboard">
+          <i class="fa-solid fa-gauge-high"></i>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" data-view="scouting">
+          <i class="fa-solid fa-binoculars"></i>
+          <span>Scouting Pro</span>
+          <span class="nav-badge" id="nav-badge-scouting">35</span>
+        </div>
+
+        <div class="nav-section-label">Conexiones</div>
+        <div class="nav-item" data-view="matchmaking">
+          <i class="fa-solid fa-handshake"></i>
+          <span>Matchmaking</span>
+          <span class="nav-badge" id="nav-badge-matches">14</span>
+        </div>
+
+        <div class="nav-section-label">Servicios</div>
+        <div class="nav-item" data-view="marketplace">
+          <i class="fa-solid fa-store"></i>
+          <span>Marketplace</span>
+        </div>
       </div>
 
-      <div class="nav-section-label">Conexiones</div>
-      <div class="nav-item" data-view="matchmaking">
-        <i class="fa-solid fa-handshake"></i>
-        <span>Matchmaking</span>
-        <span class="nav-badge" id="nav-badge-matches">14</span>
-      </div>
+      <!-- Jugador Nav (hidden by default) -->
+      <div id="nav-jugador" style="display:none;">
+        <div class="nav-section-label">Mi Espacio</div>
+        <div class="nav-item" data-view="passport">
+          <i class="fa-solid fa-id-card"></i>
+          <span>Mi Pasaporte</span>
+        </div>
+        <div class="nav-item" data-view="player-dashboard">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>Mis Estadísticas</span>
+        </div>
 
-      <div class="nav-section-label">Servicios</div>
-      <div class="nav-item" data-view="marketplace">
-        <i class="fa-solid fa-store"></i>
-        <span>Marketplace</span>
+        <div class="nav-section-label">Conexiones</div>
+        <div class="nav-item" data-view="player-matches">
+          <i class="fa-solid fa-handshake"></i>
+          <span>Mis Matches</span>
+          <span class="nav-badge" id="nav-badge-player-matches">0</span>
+        </div>
+
+        <div class="nav-section-label">Servicios</div>
+        <div class="nav-item" data-view="player-services">
+          <i class="fa-solid fa-certificate"></i>
+          <span>Mis Servicios</span>
+        </div>
+        <div class="nav-item" data-view="marketplace">
+          <i class="fa-solid fa-store"></i>
+          <span>Marketplace</span>
+        </div>
       </div>
     </nav>
 
     <div class="sidebar-footer">
-      <div class="user-card">
-        <div class="user-avatar">DD</div>
+      <div class="user-card" id="sidebar-user-card">
+        <div class="user-avatar" id="sidebar-avatar">DD</div>
         <div class="user-info">
-          <div class="user-name">Dir. Deportiva</div>
-          <div class="user-role">Real Jaén CF</div>
+          <div class="user-name" id="sidebar-name">Dir. Deportiva</div>
+          <div class="user-role" id="sidebar-role">Real Jaén CF</div>
         </div>
       </div>
     </div>
@@ -365,6 +408,18 @@
         </div>
         <div class="marketplace-grid" id="marketplace-grid"></div>
       </section>
+
+      <!-- ========== PLAYER PASSPORT VIEW ========== -->
+      <section class="view-section" id="view-passport"></section>
+
+      <!-- ========== PLAYER DASHBOARD VIEW ========== -->
+      <section class="view-section" id="view-player-dashboard"></section>
+
+      <!-- ========== PLAYER MATCHES VIEW ========== -->
+      <section class="view-section" id="view-player-matches"></section>
+
+      <!-- ========== PLAYER SERVICES VIEW ========== -->
+      <section class="view-section" id="view-player-services"></section>
 
       <!-- ========== LEGAL VIEW ========== -->
       <section class="view-section" id="view-legal">
