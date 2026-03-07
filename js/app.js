@@ -1,6 +1,7 @@
 /* ============================================
-   InfoSport – Application Logic
-   SPA Controller & Rendering Engine
+   InfoSport – App Controller v2.0
+   SPA Logic, Rendering, Auth, Notifications,
+   Settings, Matchmaking, Profile, Marketplace
    ============================================ */
 
 const App = (() => {
@@ -8,1209 +9,822 @@ const App = (() => {
 
   // ---- State ----
   let currentView = 'dashboard';
-  let currentPlayerId = null;
+  let previousView = 'dashboard';
+  let allPlayers = [];
   let filteredPlayers = [];
-  let currentRole = 'director'; // 'director' | 'jugador'
-  const PLAYER_ID = 'j-001'; // Alejandro García López (logged-in player)
 
-  // ---- DOM Helpers ----
-  const $ = (sel, ctx = document) => ctx.querySelector(sel);
-  const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
-
-  // ---- Init ----
+  // ============================================================
+  //  INIT
+  // ============================================================
   function init() {
+    allPlayers = MOCK_DATA.jugadores;
+    filteredPlayers = [...allPlayers];
+
+    bindAuth();
     bindNavigation();
-    bindFilters();
-    bindGlobalSearch();
     bindHamburger();
-    bindRoleSwitcher();
+    bindGlobalSearch();
+    bindNotifications();
+    bindSettings();
+    bindFilters();
+
+    // Render default view
     renderDashboard();
-    showView('dashboard');
+    renderScouting(filteredPlayers);
+    updateBadges();
   }
 
-  // ===================== Role Switcher =====================
-  function bindRoleSwitcher() {
-    $$('.role-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const role = btn.dataset.role;
-        switchRole(role);
+  // ============================================================
+  //  AUTH
+  // ============================================================
+  function bindAuth() {
+    // Tab switching
+    document.querySelectorAll('.auth-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.authTab;
+        document.getElementById('auth-login-form').style.display = target === 'login' ? '' : 'none';
+        document.getElementById('auth-register-form').style.display = target === 'register' ? '' : 'none';
       });
+    });
+
+    // Login form
+    document.getElementById('auth-login-form').addEventListener('submit', e => {
+      e.preventDefault();
+      enterApp();
+    });
+
+    // Register form
+    document.getElementById('auth-register-form').addEventListener('submit', e => {
+      e.preventDefault();
+      enterApp();
+    });
+
+    // Social buttons
+    ['auth-google', 'auth-facebook', 'auth-phone'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', () => enterApp());
     });
   }
 
-  function switchRole(role) {
-    currentRole = role;
-
-    // Update role buttons
-    $$('.role-btn').forEach(b => b.classList.remove('active'));
-    $(`.role-btn[data-role="${role}"]`).classList.add('active');
-
-    // Update nav groups
-    if (role === 'director') {
-      $('#nav-director').style.display = 'block';
-      $('#nav-jugador').style.display = 'none';
-      // Update sidebar identity
-      $('#sidebar-avatar').textContent = 'DD';
-      $('#sidebar-user-name').textContent = 'Dir. Deportiva';
-      $('#sidebar-user-role').textContent = 'Real Jaén CF';
-      // Update header indicator
-      const indicator = $('#header-role-indicator');
-      indicator.className = 'header-role-indicator';
-      indicator.innerHTML = '<i class="fa-solid fa-user-tie"></i> <span>Vista Director Deportivo</span>';
-      // Update search placeholder
-      $('#global-search').placeholder = 'Buscar jugador por nombre...';
-      // Go to dashboard
-      showView('dashboard');
-    } else {
-      const j = MOCK_DATA.getJugadorById(PLAYER_ID);
-      $('#nav-director').style.display = 'none';
-      $('#nav-jugador').style.display = 'block';
-      // Update sidebar identity
-      const initials = j.nombre.charAt(0) + j.apellidos.charAt(0);
-      $('#sidebar-avatar').textContent = initials;
-      $('#sidebar-user-name').textContent = `${j.nombre} ${j.apellidos}`;
-      $('#sidebar-user-role').textContent = `${j.posicionPrincipal} · ${j.categoria}`;
-      // Update header indicator
-      const indicator = $('#header-role-indicator');
-      indicator.className = 'header-role-indicator player-mode';
-      indicator.innerHTML = '<i class="fa-solid fa-futbol"></i> <span>Vista Jugador</span>';
-      // Update search placeholder
-      $('#global-search').placeholder = 'Buscar equipos, servicios...';
-      // Go to player profile
-      showView('p-miperfil');
-    }
+  function enterApp() {
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app-layout').style.display = '';
+    showToast('Sesión iniciada correctamente', 'success');
   }
 
-  // ===================== Navigation =====================
+  function logout() {
+    document.getElementById('app-layout').style.display = 'none';
+    document.getElementById('auth-screen').style.display = '';
+    // Close settings if open
+    document.getElementById('settings-overlay').classList.remove('open');
+    showToast('Sesión cerrada', 'info');
+  }
+
+  // ============================================================
+  //  NAVIGATION
+  // ============================================================
   function bindNavigation() {
-    $$('.nav-item[data-view]').forEach(item => {
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
       item.addEventListener('click', () => {
-        const view = item.dataset.view;
-        showView(view);
+        showView(item.dataset.view);
+        // Close sidebar on mobile
+        document.querySelector('.sidebar').classList.remove('open');
       });
     });
   }
 
-  function showView(view) {
-    currentView = view;
-    // Update nav
-    $$('.nav-item').forEach(n => n.classList.remove('active'));
-    const activeNav = $(`.nav-item[data-view="${view}"]`);
-    if (activeNav) activeNav.classList.add('active');
-    // Update sections
-    $$('.view-section').forEach(s => s.classList.remove('active'));
-    const section = $(`#view-${view}`);
-    if (section) {
-      section.classList.add('active');
-      section.classList.add('fade-in');
-    }
-    // Render
-    switch (view) {
-      case 'dashboard': renderDashboard(); break;
-      case 'scouting': renderScouting(); break;
-      case 'marketplace': renderMarketplace(); break;
-      case 'matchmaking': renderMatchmaking(); break;
-      case 'profile': renderProfile(currentPlayerId); break;
-      // Player views
-      case 'p-miperfil': renderPlayerMyProfile(); break;
-      case 'p-estadisticas': renderPlayerStats(); break;
-      case 'p-equipos': renderPlayerClubDirectory(); break;
-      case 'p-solicitudes': renderPlayerSolicitudes(); break;
-      case 'p-servicios': renderPlayerServicios(); break;
-    }
-    // Mobile: close sidebar
-    $('.sidebar').classList.remove('open');
-    window.scrollTo(0, 0);
+  function showView(viewId) {
+    previousView = currentView;
+    currentView = viewId;
+
+    // Update nav items
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const navItem = document.querySelector(`.nav-item[data-view="${viewId}"]`);
+    if (navItem) navItem.classList.add('active');
+
+    // Show/hide view sections
+    document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+    const viewEl = document.getElementById(`view-${viewId}`);
+    if (viewEl) viewEl.classList.add('active');
+
+    // Render on demand
+    if (viewId === 'dashboard') renderDashboard();
+    if (viewId === 'scouting') renderScouting(filteredPlayers);
+    if (viewId === 'matchmaking') renderMatchmaking();
+    if (viewId === 'marketplace') renderMarketplace();
+
+    // Scroll to top
+    document.querySelector('.page-content').scrollTop = 0;
   }
 
-  // ===================== Dashboard =====================
-  function renderDashboard() {
-    const stats = MOCK_DATA.getStatsResumen();
-    $('#stat-total').textContent = stats.total;
-    $('#stat-disponibles').textContent = stats.disponibles;
-    $('#stat-sello').textContent = stats.conSello;
-    $('#stat-matches').textContent = stats.matches;
-
-    // Render top players cards
-    const topPlayers = MOCK_DATA.jugadores.slice(0, 6);
-    const grid = $('#dashboard-players-grid');
-    grid.innerHTML = topPlayers.map(j => renderPlayerCard(j)).join('');
-    bindPlayerCardClicks(grid);
+  function goBack() {
+    showView(previousView || 'dashboard');
   }
 
-  // ===================== Scouting (Filtros Pro) =====================
-  function renderScouting() {
-    const filtros = getFilterValues();
-    filteredPlayers = MOCK_DATA.filtrarJugadores(filtros);
-    const grid = $('#scouting-players-grid');
-    const count = $('#results-count');
-
-    count.innerHTML = `Se encontraron <strong>${filteredPlayers.length}</strong> jugadores`;
-
-    if (filteredPlayers.length === 0) {
-      grid.innerHTML = `
-        <div class="empty-state" style="grid-column:1/-1">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <h3>Sin resultados</h3>
-          <p>Ajusta los filtros para encontrar jugadores.</p>
-        </div>`;
-    } else {
-      grid.innerHTML = filteredPlayers.map(j => renderPlayerCard(j)).join('');
+  // ============================================================
+  //  HAMBURGER (mobile sidebar toggle)
+  // ============================================================
+  function bindHamburger() {
+    const btn = document.getElementById('hamburger-btn');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        document.querySelector('.sidebar').classList.toggle('open');
+      });
     }
-    bindPlayerCardClicks(grid);
+  }
+
+  // ============================================================
+  //  GLOBAL SEARCH
+  // ============================================================
+  function bindGlobalSearch() {
+    const input = document.getElementById('global-search');
+    if (!input) return;
+
+    input.addEventListener('input', () => {
+      const term = input.value.trim().toLowerCase();
+      if (!term) {
+        filteredPlayers = [...allPlayers];
+      } else {
+        filteredPlayers = allPlayers.filter(j => {
+          const full = `${j.nombre} ${j.apellidos}`.toLowerCase();
+          return full.includes(term);
+        });
+      }
+
+      if (currentView === 'scouting') {
+        renderScouting(filteredPlayers);
+      } else {
+        showView('scouting');
+        renderScouting(filteredPlayers);
+      }
+    });
+  }
+
+  // ============================================================
+  //  NOTIFICATIONS PANEL
+  // ============================================================
+  function bindNotifications() {
+    const btn = document.getElementById('btn-notifications');
+    const panel = document.getElementById('notifications-panel');
+    const backdrop = document.getElementById('notifications-backdrop');
+    const closeBtn = document.getElementById('notifications-close');
+
+    if (btn) btn.addEventListener('click', () => openNotifications());
+    if (closeBtn) closeBtn.addEventListener('click', () => closeNotifications());
+    if (backdrop) backdrop.addEventListener('click', () => closeNotifications());
+
+    renderNotificationsList();
+  }
+
+  function openNotifications() {
+    document.getElementById('notifications-panel').classList.add('open');
+    document.getElementById('notifications-backdrop').classList.add('open');
+    // Mark dot as read
+    const dot = document.querySelector('.notif-dot');
+    if (dot) dot.style.display = 'none';
+  }
+
+  function closeNotifications() {
+    document.getElementById('notifications-panel').classList.remove('open');
+    document.getElementById('notifications-backdrop').classList.remove('open');
+  }
+
+  function renderNotificationsList() {
+    const container = document.getElementById('notifications-list');
+    if (!container) return;
+
+    const iconMap = {
+      match: 'fa-handshake',
+      scouting: 'fa-binoculars',
+      servicio: 'fa-store',
+      sistema: 'fa-circle-info',
+    };
+
+    const colorMap = {
+      match: 'var(--accent)',
+      scouting: '#2196f3',
+      servicio: '#ff9800',
+      sistema: '#9e9e9e',
+    };
+
+    container.innerHTML = MOCK_DATA.notificaciones.map(n => `
+      <div class="notification-item ${n.leida ? 'read' : 'unread'}">
+        <div class="notification-icon" style="color:${colorMap[n.tipo] || 'var(--accent)'}">
+          <i class="fa-solid ${iconMap[n.tipo] || 'fa-bell'}"></i>
+        </div>
+        <div class="notification-content">
+          <div class="notification-title">${n.titulo}</div>
+          <div class="notification-text">${n.texto}</div>
+          <div class="notification-time">${n.fecha}</div>
+        </div>
+        ${!n.leida ? '<div class="notification-unread-dot"></div>' : ''}
+      </div>
+    `).join('');
+  }
+
+  // ============================================================
+  //  SETTINGS PANEL
+  // ============================================================
+  function bindSettings() {
+    const btn = document.getElementById('btn-settings');
+    const overlay = document.getElementById('settings-overlay');
+    const closeBtn = document.getElementById('settings-close');
+
+    if (btn) btn.addEventListener('click', () => overlay.classList.add('open'));
+    if (closeBtn) closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+
+    // Click outside panel to close
+    if (overlay) {
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay) overlay.classList.remove('open');
+      });
+    }
+  }
+
+  // ============================================================
+  //  FILTERS
+  // ============================================================
+  function bindFilters() {
+    const searchBtn = document.getElementById('btn-filter-search');
+    const resetBtn = document.getElementById('btn-filter-reset');
+
+    if (searchBtn) {
+      searchBtn.addEventListener('click', () => {
+        const filtros = getFilterValues();
+        filteredPlayers = MOCK_DATA.filtrarJugadores(filtros);
+        renderScouting(filteredPlayers);
+      });
+    }
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        // Reset all filter inputs
+        ['filter-nombre', 'filter-goles-min', 'filter-edad-min', 'filter-edad-max'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        ['filter-categoria', 'filter-posicion', 'filter-localidad', 'filter-pierna', 'filter-sello'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        const disp = document.getElementById('filter-disponible');
+        if (disp) disp.checked = false;
+
+        filteredPlayers = [...allPlayers];
+        renderScouting(filteredPlayers);
+      });
+    }
   }
 
   function getFilterValues() {
     return {
-      nombre: $('#filter-nombre')?.value || '',
-      categoria: $('#filter-categoria')?.value || '',
-      posicion: $('#filter-posicion')?.value || '',
-      localidad: $('#filter-localidad')?.value || '',
-      pierna: $('#filter-pierna')?.value || '',
-      disponible: $('#filter-disponible')?.checked || false,
-      sello: $('#filter-sello')?.value || '',
-      golesMin: $('#filter-goles-min')?.value || '',
-      edadMin: $('#filter-edad-min')?.value || '',
-      edadMax: $('#filter-edad-max')?.value || '',
+      nombre: val('filter-nombre'),
+      categoria: val('filter-categoria'),
+      posicion: val('filter-posicion'),
+      localidad: val('filter-localidad'),
+      pierna: val('filter-pierna'),
+      sello: val('filter-sello'),
+      golesMin: val('filter-goles-min'),
+      edadMin: val('filter-edad-min'),
+      edadMax: val('filter-edad-max'),
+      disponible: document.getElementById('filter-disponible')?.checked || false,
     };
   }
 
-  function bindFilters() {
-    const debounced = debounce(() => {
-      if (currentView === 'scouting') renderScouting();
-    }, 250);
-
-    $$('.filter-group select, .filter-group input').forEach(el => {
-      el.addEventListener('change', debounced);
-      el.addEventListener('input', debounced);
-    });
-
-    const btnSearch = $('#btn-filter-search');
-    if (btnSearch) btnSearch.addEventListener('click', () => renderScouting());
-
-    const btnReset = $('#btn-filter-reset');
-    if (btnReset) btnReset.addEventListener('click', () => {
-      $$('.filter-group select').forEach(s => s.value = '');
-      $$('.filter-group input[type="number"]').forEach(i => i.value = '');
-      $$('.filter-group input[type="text"]').forEach(i => i.value = '');
-      const chk = $('#filter-disponible');
-      if (chk) chk.checked = false;
-      renderScouting();
-    });
+  function val(id) {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
   }
 
-  // ===================== Player Card (List) =====================
-  function renderPlayerCard(j) {
-    const pos = MOCK_DATA.posiciones[j.posicionPrincipal];
-    const edad = new Date().getFullYear() - j.nacimiento;
-    const mediaGol = j.stats.goles > 0 ? Math.round(j.stats.minutos / j.stats.goles) : '—';
-    const ratioTitular = j.stats.partidos > 0 ? Math.round((j.stats.titular / j.stats.partidos) * 100) : 0;
-    const initials = j.nombre.charAt(0) + j.apellidos.charAt(0);
+  // ============================================================
+  //  BADGES
+  // ============================================================
+  function updateBadges() {
+    const stats = MOCK_DATA.getStatsResumen();
+    setTextContent('nav-badge-scouting', stats.total);
+    setTextContent('nav-badge-matches', MOCK_DATA.matchmaking.length);
+  }
 
-    let selloHTML = '';
-    if (j.sello === 'gold') {
-      selloHTML = `<span class="sello-badge gold"><i class="fa-solid fa-medal"></i> Alto Rendimiento</span>`;
-    } else if (j.sello === 'silver') {
-      selloHTML = `<span class="sello-badge silver"><i class="fa-solid fa-shield-halved"></i> En seguimiento</span>`;
+  // ============================================================
+  //  DASHBOARD
+  // ============================================================
+  function renderDashboard() {
+    const stats = MOCK_DATA.getStatsResumen();
+
+    setTextContent('stat-total', stats.total);
+    setTextContent('stat-disponibles', stats.disponibles);
+    setTextContent('stat-sello', stats.conSello);
+    setTextContent('stat-matches', stats.matches);
+
+    // Featured players (gold sello or top scorers)
+    const featured = allPlayers
+      .filter(j => j.sello === 'gold' || j.stats.goles >= 10)
+      .sort((a, b) => b.stats.goles - a.stats.goles)
+      .slice(0, 6);
+
+    const grid = document.getElementById('dashboard-players-grid');
+    if (grid) {
+      grid.innerHTML = featured.map(j => renderPlayerCard(j)).join('');
+      bindPlayerCardClicks(grid);
     }
+  }
+
+  // ============================================================
+  //  SCOUTING
+  // ============================================================
+  function renderScouting(players) {
+    const grid = document.getElementById('scouting-players-grid');
+    const countEl = document.getElementById('results-count');
+
+    if (countEl) {
+      countEl.innerHTML = `Se encontraron <strong>${players.length}</strong> jugadores`;
+    }
+
+    if (grid) {
+      if (players.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem;color:var(--text-muted);">
+            <i class="fa-solid fa-search" style="font-size:2.5rem;margin-bottom:1rem;display:block;opacity:.4"></i>
+            <p style="font-size:1.05rem;">No se encontraron jugadores con esos criterios.</p>
+            <p style="font-size:0.85rem;margin-top:0.5rem;">Prueba a modificar los filtros para ampliar la búsqueda.</p>
+          </div>
+        `;
+      } else {
+        grid.innerHTML = players.map(j => renderPlayerCard(j)).join('');
+        bindPlayerCardClicks(grid);
+      }
+    }
+  }
+
+  // ============================================================
+  //  PLAYER CARD
+  // ============================================================
+  function renderPlayerCard(j) {
+    const posInfo = MOCK_DATA.posiciones[j.posicionPrincipal] || { abr: '??', color: '#666' };
+    const edad = new Date().getFullYear() - j.nacimiento;
+    const equipo = j.historialEquipos[0];
+    const clubData = equipo ? MOCK_DATA.getEquipoByNombre(equipo.equipo) : null;
+    const iniciales = `${j.nombre[0]}${j.apellidos[0]}`;
+
+    const sellos = {
+      gold: '<span class="sello gold" title="Sello de Alto Rendimiento"><i class="fa-solid fa-medal"></i> Alto Rendimiento</span>',
+      silver: '<span class="sello silver" title="En seguimiento"><i class="fa-solid fa-eye"></i> En seguimiento</span>',
+      none: '',
+    };
 
     return `
       <div class="player-card" data-player-id="${j.id}">
         <div class="player-card-header">
-          <div class="player-avatar">${initials}</div>
-          <div class="player-main-info">
-            <div class="player-name">${j.nombre} ${j.apellidos}</div>
-            <div class="player-position">${pos?.abr || ''} · ${j.posicionPrincipal}</div>
-            <div class="player-meta-row">
-              <span class="meta-tag">${j.categoria}</span>
-              <span class="meta-tag">${edad} años</span>
-              <span class="meta-tag">${j.localidad}</span>
-              <span class="meta-tag">${j.pierna}</span>
+          <div class="player-avatar">${iniciales}</div>
+          <div class="player-header-info">
+            <h3>${j.nombre} ${j.apellidos}</h3>
+            <div class="player-club">
+              ${clubData ? clubData.logo : '⚽'} ${equipo ? equipo.equipo : 'Sin club'}
             </div>
           </div>
+          <div class="player-position" style="background:${posInfo.color}">${posInfo.abr}</div>
         </div>
         <div class="player-card-body">
-          <div class="player-stats-mini">
-            <div class="mini-stat"><span class="val">${j.stats.goles}</span><span class="lbl">Goles</span></div>
-            <div class="mini-stat"><span class="val">${j.stats.asistencias}</span><span class="lbl">Asist.</span></div>
-            <div class="mini-stat"><span class="val">${mediaGol}</span><span class="lbl">Min/Gol</span></div>
-            <div class="mini-stat"><span class="val">${ratioTitular}%</span><span class="lbl">Titular</span></div>
+          <div class="player-meta">
+            <span><i class="fa-solid fa-calendar"></i> ${edad} años</span>
+            <span><i class="fa-solid fa-location-dot"></i> ${j.localidad}</span>
+            <span><i class="fa-solid fa-shoe-prints"></i> ${j.pierna}</span>
+            <span><i class="fa-solid fa-tag"></i> ${j.categoria}</span>
           </div>
+          <div class="player-stats-row">
+            <div class="player-stat"><strong>${j.stats.partidos}</strong><span>PJ</span></div>
+            <div class="player-stat"><strong>${j.stats.goles}</strong><span>GOL</span></div>
+            <div class="player-stat"><strong>${j.stats.asistencias}</strong><span>ASI</span></div>
+            <div class="player-stat"><strong>${j.stats.tarjetasAmarillas}</strong><span>TA</span></div>
+          </div>
+          ${sellos[j.sello] || ''}
         </div>
         <div class="player-card-footer">
-          <div class="availability-badge">
-            <span class="dot ${j.disponible ? 'available' : 'unavailable'}"></span>
-            ${j.disponible ? 'Disponible' : 'No disponible'}
-          </div>
-          ${selloHTML}
+          <span class="availability ${j.disponible ? 'available' : 'unavailable'}">
+            <i class="fa-solid fa-circle"></i> ${j.disponible ? 'Disponible' : 'No disponible'}
+          </span>
+          <button class="btn btn-sm btn-primary" onclick="App.openPlayerProfile('${j.id}'); event.stopPropagation();">
+            <i class="fa-solid fa-eye"></i> Ver perfil
+          </button>
         </div>
       </div>
     `;
   }
 
   function bindPlayerCardClicks(container) {
-    $$('.player-card', container).forEach(card => {
+    container.querySelectorAll('.player-card').forEach(card => {
       card.addEventListener('click', () => {
         const id = card.dataset.playerId;
-        openPlayerProfile(id);
+        if (id) openPlayerProfile(id);
       });
     });
   }
 
-  function openPlayerProfile(id) {
-    currentPlayerId = id;
-    showView('profile');
-  }
-
-  // ===================== Player Profile (Detailed) =====================
-  function renderProfile(id) {
-    const j = MOCK_DATA.getJugadorById(id);
+  // ============================================================
+  //  PLAYER PROFILE
+  // ============================================================
+  function openPlayerProfile(playerId) {
+    const j = MOCK_DATA.getJugadorById(playerId);
     if (!j) return;
 
-    const container = $('#view-profile');
+    previousView = currentView;
+    currentView = 'profile';
+
+    // Hide all views, show profile
+    document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+    document.getElementById('view-profile').classList.add('active');
+
+    // Remove active from nav
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+    renderProfile(j);
+    document.querySelector('.page-content').scrollTop = 0;
+  }
+
+  function renderProfile(j) {
+    const container = document.getElementById('view-profile');
+    const posInfo = MOCK_DATA.posiciones[j.posicionPrincipal] || { abr: '??', color: '#666' };
     const edad = new Date().getFullYear() - j.nacimiento;
-    const pos = MOCK_DATA.posiciones[j.posicionPrincipal];
-    const mediaGol = j.stats.goles > 0 ? Math.round(j.stats.minutos / j.stats.goles) : '—';
-    const ratioTitular = j.stats.partidos > 0 ? Math.round((j.stats.titular / j.stats.partidos) * 100) : 0;
-    const initials = j.nombre.charAt(0) + j.apellidos.charAt(0);
-    const minutosGolesFormatted = j.stats.minutoGolMedia.length > 0
-      ? j.stats.minutoGolMedia.map(m => `${m}'`).join(', ')
-      : 'Sin datos';
+    const equipo = j.historialEquipos[0];
+    const clubData = equipo ? MOCK_DATA.getEquipoByNombre(equipo.equipo) : null;
+    const iniciales = `${j.nombre[0]}${j.apellidos[0]}`;
+    const matches = MOCK_DATA.getMatchesByJugador(j.id);
 
-    let selloHTML = '';
-    if (j.sello === 'gold') {
-      selloHTML = `<span class="sello-badge gold" style="font-size:0.85rem;padding:6px 14px;"><i class="fa-solid fa-medal"></i> Sello Alto Rendimiento</span>`;
-    } else if (j.sello === 'silver') {
-      selloHTML = `<span class="sello-badge silver" style="font-size:0.85rem;padding:6px 14px;"><i class="fa-solid fa-shield-halved"></i> En seguimiento</span>`;
-    }
-
-    // Alt positions
-    const altPosHTML = j.posicionesAlt.length > 0
-      ? j.posicionesAlt.map(p => `<span class="meta-tag" style="font-size:0.78rem">${p}</span>`).join(' ')
-      : '<span class="meta-tag">—</span>';
-
-    // Team history
-    const teamHistoryHTML = j.historialEquipos.map(t => {
-      const eq = MOCK_DATA.getEquipoByNombre(t.equipo);
-      return `
-        <div class="team-history-item">
-          <div class="team-badge">${eq ? eq.logo : '⚽'}</div>
-          <span class="team-name">${t.equipo} <span style="color:var(--text-muted);font-weight:400;font-size:0.75rem">(${t.categoria})</span></span>
-          <span class="team-years">${t.temporadas}</span>
-        </div>`;
-    }).join('');
-
-    // Coach wall
-    const coachWallHTML = j.muroEntrenador.map(c => `
-      <div class="coach-quote">
-        <p>${c.texto}</p>
-        <div class="coach-name">— ${c.entrenador} · ${c.fecha}</div>
-      </div>`
-    ).join('');
-
-    // Semáforo de Salud
-    const allServices = [
-      { key: 'srv-1', nombre: 'Nutrición Deportiva', icono: 'fa-apple-whole', iconClass: 'green' },
-      { key: 'srv-2', nombre: 'Psicología Deportiva', icono: 'fa-brain', iconClass: 'orange' },
-      { key: 'srv-3', nombre: 'Preparación Física', icono: 'fa-dumbbell', iconClass: 'green' },
-    ];
-
-    const semaphoreHTML = allServices.map(s => {
-      const activo = j.serviciosActivos.includes(s.key);
-      const info = j.serviciosInfo.find(si => si.icono === s.icono);
-      return `
-        <div class="semaphore-item ${activo ? 'active' : 'inactive'}">
-          <div class="semaphore-icon ${activo ? s.iconClass : 'gray'}">
-            <i class="fa-solid ${s.icono}"></i>
-          </div>
-          <div class="semaphore-info">
-            <h4>${s.nombre}</h4>
-            <p>${activo ? `Activo · ${info ? info.duracion : ''}` : 'No contratado'}</p>
-          </div>
-        </div>`;
-    }).join('');
-
-    // Multimedia
-    const mediaHTML = j.multimedia.map(m => `
-      <div class="media-thumb">
-        <i class="fa-solid ${m.icono}"></i>
-        <div class="media-label">${m.titulo}</div>
-      </div>`
-    ).join('');
-
-    // Matches
-    const playerMatches = MOCK_DATA.getMatchesByJugador(id);
-    let matchesHTML = '';
-    if (playerMatches.length > 0) {
-      matchesHTML = playerMatches.map(m => {
-        const statusClass = m.estado;
-        const statusLabel = m.estado === 'matched' ? '✅ Match' : m.estado === 'pending' ? '⏳ Pendiente' : '❌ Rechazado';
-        let chatHTML = '';
-        if (m.estado === 'matched' && m.mensajes.length > 0) {
-          const msgs = m.mensajes.map(msg => `<div class="chat-msg ${msg.tipo}">${msg.texto}</div>`).join('');
-          chatHTML = `
-            <div class="chat-container" style="margin-top:0.75rem">
-              <div class="chat-messages">${msgs}</div>
-              <div class="chat-input-bar">
-                <input type="text" placeholder="Escribe un mensaje..." />
-                <button onclick="App.showToast('Mensaje enviado (demo)', 'success')">Enviar</button>
-              </div>
-            </div>`;
-        }
-        return `
-          <div class="match-card">
-            <div class="match-card-header">
-              <div class="match-club-logo">${m.clubLogo}</div>
-              <div>
-                <div class="match-club-name">${m.club}</div>
-                <div class="match-club-info">${m.clubInfo}</div>
-              </div>
-            </div>
-            <div class="match-status ${statusClass}">${statusLabel}</div>
-            <div class="match-needs"><strong>Necesidad:</strong> ${m.necesidad}</div>
-            ${m.estado === 'pending' ? `<button class="btn btn-sm btn-outline-accent" onclick="App.simulateMatch('${m.id}')"><i class="fa-solid fa-handshake"></i> Simular Match</button>` : ''}
-            ${chatHTML}
-          </div>`;
-      }).join('');
-    } else {
-      matchesHTML = `<div class="empty-state"><i class="fa-solid fa-handshake-slash"></i><h3>Sin solicitudes</h3><p>Este jugador no tiene solicitudes de contacto activas.</p></div>`;
-    }
+    const sellos = {
+      gold: '<span class="sello gold"><i class="fa-solid fa-medal"></i> Sello de Alto Rendimiento</span>',
+      silver: '<span class="sello silver"><i class="fa-solid fa-eye"></i> En seguimiento</span>',
+      none: '<span class="sello none"><i class="fa-solid fa-minus"></i> Sin sello</span>',
+    };
 
     container.innerHTML = `
-      <button class="back-btn" onclick="App.goBack()"><i class="fa-solid fa-arrow-left"></i> Volver al listado</button>
+      <button class="back-btn" onclick="App.goBack()"><i class="fa-solid fa-arrow-left"></i> Volver</button>
 
-      <!-- Hero -->
-      <div class="profile-hero">
-        <div class="profile-hero-top">
-          <div class="profile-avatar-lg">${initials}</div>
-          <div class="profile-info-block">
-            <div class="profile-name">${j.nombre} ${j.apellidos}</div>
-            <div class="profile-position-main">${pos?.abr || ''} · ${j.posicionPrincipal}</div>
-            <div class="profile-details-grid">
-              <div class="detail-item"><span class="detail-label">Categoría</span><span class="detail-value">${j.categoria}</span></div>
-              <div class="detail-item"><span class="detail-label">Edad</span><span class="detail-value">${edad} años (${j.nacimiento})</span></div>
-              <div class="detail-item"><span class="detail-label">Localidad</span><span class="detail-value">${j.localidad}</span></div>
-              <div class="detail-item"><span class="detail-label">Altura</span><span class="detail-value">${j.altura} cm</span></div>
-              <div class="detail-item"><span class="detail-label">Peso</span><span class="detail-value">${j.peso} kg</span></div>
-              <div class="detail-item"><span class="detail-label">Pierna</span><span class="detail-value">${j.pierna}</span></div>
-              <div class="detail-item"><span class="detail-label">Pos. Alternativas</span><span class="detail-value" style="display:flex;gap:4px;flex-wrap:wrap">${altPosHTML}</span></div>
+      <!-- Profile Header -->
+      <div class="profile-header-card">
+        <div class="profile-top">
+          <div class="profile-avatar">${iniciales}</div>
+          <div class="profile-info">
+            <h2>${j.nombre} ${j.apellidos}</h2>
+            <div class="profile-club">${clubData ? clubData.logo : '⚽'} ${equipo ? equipo.equipo : 'Sin club'} · ${equipo ? equipo.categoria : ''}</div>
+            <div class="profile-meta-row">
+              <span class="profile-position" style="background:${posInfo.color}">${j.posicionPrincipal}</span>
+              ${j.posicionesAlt.map(p => {
+                const pi = MOCK_DATA.posiciones[p] || { color: '#666' };
+                return `<span class="profile-position alt" style="background:${pi.color}88">${p}</span>`;
+              }).join('')}
             </div>
           </div>
           <div class="profile-actions">
-            ${selloHTML}
-            <label class="toggle-switch" style="margin-top:0.75rem">
-              <input type="checkbox" ${j.disponible ? 'checked' : ''} onchange="App.toggleAvailability('${j.id}', this.checked)" />
-              <span class="toggle-slider"></span>
-              <span class="toggle-label">${j.disponible ? 'Visible para clubes' : 'Oculto'}</span>
-            </label>
-            <button class="btn btn-blue btn-sm" style="margin-top:0.5rem" onclick="App.showToast('Solicitud de plaza enviada (demo)', 'info')"><i class="fa-solid fa-paper-plane"></i> Solicitar plaza</button>
+            <button class="btn btn-primary" onclick="App.simulateMatch('${j.id}')">
+              <i class="fa-solid fa-handshake"></i> Solicitar Match
+            </button>
+            <button class="btn ${j.disponible ? 'btn-success' : 'btn-secondary'}" onclick="App.toggleAvailability('${j.id}')">
+              <i class="fa-solid fa-${j.disponible ? 'toggle-on' : 'toggle-off'}"></i>
+              ${j.disponible ? 'Disponible' : 'No disponible'}
+            </button>
           </div>
+        </div>
+
+        <div class="profile-details-grid">
+          <div class="detail-item"><i class="fa-solid fa-calendar"></i><span>Nacimiento</span><strong>${j.nacimiento} (${edad} años)</strong></div>
+          <div class="detail-item"><i class="fa-solid fa-location-dot"></i><span>Localidad</span><strong>${j.localidad}</strong></div>
+          <div class="detail-item"><i class="fa-solid fa-shoe-prints"></i><span>Pierna</span><strong>${j.pierna}</strong></div>
+          <div class="detail-item"><i class="fa-solid fa-ruler-vertical"></i><span>Altura</span><strong>${j.altura} cm</strong></div>
+          <div class="detail-item"><i class="fa-solid fa-weight-scale"></i><span>Peso</span><strong>${j.peso} kg</strong></div>
+          <div class="detail-item"><i class="fa-solid fa-tag"></i><span>Categoría</span><strong>${j.categoria}</strong></div>
+        </div>
+
+        <div class="profile-sello-row">
+          ${sellos[j.sello] || sellos.none}
         </div>
       </div>
 
-      <div class="two-col">
-        <!-- Left Column -->
-        <div>
-          <!-- Estadísticas -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-chart-bar"></i> Estadísticas Avanzadas</h3></div>
-            <div class="section-card-body">
-              <div class="profile-stats-grid">
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.partidos}</div><div class="stat-label">Partidos</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.goles}</div><div class="stat-label">Goles</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.asistencias}</div><div class="stat-label">Asistencias</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.tarjetasAmarillas}</div><div class="stat-label">T. Amarillas</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.tarjetasRojas}</div><div class="stat-label">T. Rojas</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.minutos}'</div><div class="stat-label">Minutos</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${mediaGol}'</div><div class="stat-label">Media Min/Gol</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${ratioTitular}%</div><div class="stat-label">Ratio Titular</div></div>
+      <!-- Stats -->
+      <div class="section-card">
+        <div class="section-card-header"><h3><i class="fa-solid fa-chart-bar"></i> Estadísticas</h3></div>
+        <div class="section-card-body">
+          <div class="stats-grid-profile">
+            <div class="stat-box"><div class="stat-value">${j.stats.partidos}</div><div class="stat-label">Partidos</div></div>
+            <div class="stat-box accent"><div class="stat-value">${j.stats.goles}</div><div class="stat-label">Goles</div></div>
+            <div class="stat-box"><div class="stat-value">${j.stats.asistencias}</div><div class="stat-label">Asistencias</div></div>
+            <div class="stat-box"><div class="stat-value">${j.stats.minutos}'</div><div class="stat-label">Minutos</div></div>
+            <div class="stat-box"><div class="stat-value">${j.stats.titular}</div><div class="stat-label">Titular</div></div>
+            <div class="stat-box"><div class="stat-value">${j.stats.suplente}</div><div class="stat-label">Suplente</div></div>
+            <div class="stat-box warn"><div class="stat-value">${j.stats.tarjetasAmarillas}</div><div class="stat-label">Amarillas</div></div>
+            <div class="stat-box danger"><div class="stat-value">${j.stats.tarjetasRojas}</div><div class="stat-label">Rojas</div></div>
+          </div>
+          ${j.stats.minutoGolMedia.length > 0 ? `
+            <div class="goal-minutes">
+              <h4>Minutos de gol</h4>
+              <div class="goal-minutes-bar">
+                ${renderGoalMinutesBar(j.stats.minutoGolMedia)}
               </div>
-              <div style="margin-top:1rem;padding:0.75rem;background:var(--bg-input);border-radius:var(--radius-sm);">
-                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.35rem;font-weight:600;">Minuto de los goles</div>
-                <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">${minutosGolesFormatted}</div>
-              </div>
             </div>
-          </div>
-
-          <!-- Muro del Entrenador -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-bullhorn"></i> Muro del Entrenador</h3></div>
-            <div class="section-card-body">${coachWallHTML}</div>
-          </div>
-
-          <!-- Matchmaking -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-handshake"></i> Zona de Contacto (Matchmaking)</h3></div>
-            <div class="section-card-body">
-              <div class="matchmaking-grid">${matchesHTML}</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right Column -->
-        <div>
-          <!-- Semáforo de Salud -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-heartbeat"></i> Semáforo de Salud / Sello de Alto Rendimiento</h3></div>
-            <div class="section-card-body">
-              <div class="health-semaphore">${semaphoreHTML}</div>
-              ${j.sello === 'gold' ? `<div style="margin-top:1rem;padding:0.75rem;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.2);border-radius:var(--radius-sm);font-size:0.8rem;color:var(--warning);display:flex;align-items:center;gap:0.5rem;"><i class="fa-solid fa-trophy"></i> <strong>Sello de Alto Rendimiento desbloqueado.</strong> Este jugador trabaja activamente con los profesionales de InfoSport.</div>` : `<div style="margin-top:1rem;padding:0.75rem;background:rgba(136,146,176,0.08);border:1px solid rgba(136,146,176,0.15);border-radius:var(--radius-sm);font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;"><i class="fa-solid fa-info-circle"></i> Contrata servicios de nutrición, psicología y preparación física para desbloquear el Sello de Alto Rendimiento.</div>`}
-            </div>
-          </div>
-
-          <!-- Historial de Equipos -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-shirt"></i> Historial de Equipos</h3></div>
-            <div class="section-card-body">
-              <div class="team-history-list">${teamHistoryHTML}</div>
-            </div>
-          </div>
-
-          <!-- Multimedia -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-photo-film"></i> Multimedia</h3></div>
-            <div class="section-card-body">
-              <div class="media-gallery">${mediaHTML}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // ===================== Marketplace =====================
-  function renderMarketplace() {
-    const grid = $('#marketplace-grid');
-    grid.innerHTML = MOCK_DATA.servicios.map(s => `
-      <div class="service-card">
-        <div class="service-card-top">
-          <div class="service-icon ${s.iconClass}"><i class="fa-solid ${s.icono}"></i></div>
-          <div class="service-info">
-            <h3>${s.nombre}</h3>
-            <p>${s.descripcion}</p>
-            <div class="service-partner"><i class="fa-solid fa-handshake-angle"></i> ${s.partner}</div>
-          </div>
-        </div>
-        <div class="service-card-bottom">
-          <div class="service-price">${s.precio}€ <span>${s.periodo}</span></div>
-          ${s.desbloqueaSello ? `<div class="service-unlocks"><i class="fa-solid fa-lock-open"></i> Desbloquea Sello</div>` : ''}
-          <button class="btn btn-sm btn-primary" onclick="App.showToast('Servicio contratado (demo): ${s.nombre}', 'success')"><i class="fa-solid fa-cart-plus"></i> Contratar</button>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  // ===================== Matchmaking =====================
-  function renderMatchmaking() {
-    const grid = $('#matchmaking-grid-view');
-    const matches = MOCK_DATA.matchmaking;
-
-    grid.innerHTML = matches.map(m => {
-      const j = MOCK_DATA.getJugadorById(m.jugadorId);
-      const statusClass = m.estado;
-      const statusLabel = m.estado === 'matched' ? '✅ Match' : m.estado === 'pending' ? '⏳ Pendiente' : '❌ Rechazado';
-      return `
-        <div class="match-card">
-          <div class="match-card-header">
-            <div class="match-club-logo">${m.clubLogo}</div>
-            <div>
-              <div class="match-club-name">${m.club}</div>
-              <div class="match-club-info">${m.clubInfo}</div>
-            </div>
-          </div>
-          <div class="match-status ${statusClass}">${statusLabel}</div>
-          <div class="match-needs"><strong>Jugador:</strong> ${j ? `${j.nombre} ${j.apellidos}` : 'Desconocido'}</div>
-          <div class="match-needs"><strong>Necesidad:</strong> ${m.necesidad}</div>
-          ${m.estado === 'pending' ? `<button class="btn btn-sm btn-outline-accent" onclick="App.simulateMatch('${m.id}')"><i class="fa-solid fa-handshake"></i> Simular Match</button>` : ''}
-          ${m.estado === 'matched' ? `<button class="btn btn-sm btn-blue" onclick="App.openPlayerProfile('${m.jugadorId}')"><i class="fa-solid fa-comment-dots"></i> Ver Chat</button>` : ''}
-        </div>`;
-    }).join('');
-  }
-
-  // ===================== Global Search =====================
-  function bindGlobalSearch() {
-    const input = $('#global-search');
-    if (!input) return;
-
-    input.addEventListener('input', debounce(() => {
-      const term = input.value.trim();
-      if (term.length >= 2) {
-        showView('scouting');
-        const filterNombre = $('#filter-nombre');
-        if (filterNombre) {
-          filterNombre.value = term;
-          renderScouting();
-        }
-      }
-    }, 400));
-  }
-
-  // ===================== Hamburger =====================
-  function bindHamburger() {
-    const hamburger = $('#hamburger-btn');
-    if (hamburger) {
-      hamburger.addEventListener('click', () => {
-        $('.sidebar').classList.toggle('open');
-      });
-    }
-  }
-
-  // ===================== Actions =====================
-  function toggleAvailability(id, checked) {
-    const j = MOCK_DATA.getJugadorById(id);
-    if (j) {
-      j.disponible = checked;
-      showToast(checked ? 'Perfil visible para clubes' : 'Perfil oculto para clubes', 'success');
-      // Update toggle labels (may exist in both director and player views)
-      $$('.toggle-label').forEach(label => {
-        if (label.id === 'player-avail-label' || label.closest('.profile-actions') || label.closest('.player-welcome-actions')) {
-          label.textContent = checked ? 'Visible para clubes' : 'Oculto para clubes';
-        }
-      });
-    }
-  }
-
-  function simulateMatch(matchId) {
-    const m = MOCK_DATA.matchmaking.find(x => x.id === matchId);
-    if (m) {
-      m.estado = 'matched';
-      m.mensajes = [
-        { tipo: 'received', texto: `¡Enhorabuena! ${m.club} ha aceptado tu solicitud. Nos ponemos en contacto contigo pronto.`, tiempo: 'Ahora' },
-      ];
-      showToast(`¡Match con ${m.club}! Chat habilitado.`, 'success');
-      // Re-render
-      if (currentView === 'matchmaking') renderMatchmaking();
-      if (currentView === 'profile') renderProfile(currentPlayerId);
-    }
-  }
-
-  function goBack() {
-    if (currentRole === 'jugador') {
-      showView('p-miperfil');
-    } else {
-      showView('scouting');
-    }
-  }
-
-  // ===================== PLAYER VIEWS =====================
-
-  // ---- Mi Perfil (Player sees their own profile) ----
-  function renderPlayerMyProfile() {
-    const j = MOCK_DATA.getJugadorById(PLAYER_ID);
-    if (!j) return;
-    const container = $('#view-p-miperfil');
-    const edad = new Date().getFullYear() - j.nacimiento;
-    const pos = MOCK_DATA.posiciones[j.posicionPrincipal];
-    const initials = j.nombre.charAt(0) + j.apellidos.charAt(0);
-
-    // Team history
-    const teamHistoryHTML = j.historialEquipos.map(t => {
-      const eq = MOCK_DATA.getEquipoByNombre(t.equipo);
-      return `
-        <div class="team-history-item">
-          <div class="team-badge">${eq ? eq.logo : '⚽'}</div>
-          <span class="team-name">${t.equipo} <span style="color:var(--text-muted);font-weight:400;font-size:0.75rem">(${t.categoria})</span></span>
-          <span class="team-years">${t.temporadas}</span>
-        </div>`;
-    }).join('');
-
-    // Coach wall
-    const coachWallHTML = j.muroEntrenador.map(c => `
-      <div class="coach-quote">
-        <p>${c.texto}</p>
-        <div class="coach-name">— ${c.entrenador} · ${c.fecha}</div>
-      </div>`
-    ).join('');
-
-    // Multimedia
-    const mediaHTML = j.multimedia.map(m => `
-      <div class="media-thumb">
-        <i class="fa-solid ${m.icono}"></i>
-        <div class="media-label">${m.titulo}</div>
-      </div>`
-    ).join('');
-
-    // Alt positions
-    const altPosHTML = j.posicionesAlt.length > 0
-      ? j.posicionesAlt.map(p => `<span class="meta-tag" style="font-size:0.78rem">${p}</span>`).join(' ')
-      : '<span class="meta-tag">—</span>';
-
-    // Sello progress
-    const selloServices = ['srv-1', 'srv-2', 'srv-3'];
-    const activeSelloCount = selloServices.filter(s => j.serviciosActivos.includes(s)).length;
-    const selloPercent = Math.round((activeSelloCount / selloServices.length) * 100);
-    const circumference = 2 * Math.PI * 42;
-    const dashOffset = circumference - (selloPercent / 100) * circumference;
-
-    container.innerHTML = `
-      <!-- Welcome Banner -->
-      <div class="player-welcome">
-        <div class="player-welcome-avatar">${initials}</div>
-        <div class="player-welcome-info">
-          <h2>¡Hola, ${j.nombre}!</h2>
-          <p>${pos?.abr || ''} · ${j.posicionPrincipal} · ${j.categoria} · ${j.localidad}</p>
-        </div>
-        <div class="player-welcome-actions">
-          <label class="toggle-switch">
-            <input type="checkbox" ${j.disponible ? 'checked' : ''} onchange="App.toggleAvailability('${j.id}', this.checked)" />
-            <span class="toggle-slider"></span>
-            <span class="toggle-label" id="player-avail-label">${j.disponible ? 'Visible para clubes' : 'Oculto para clubes'}</span>
-          </label>
-          ${j.sello === 'gold' ? `<span class="sello-badge gold" style="font-size:0.8rem;padding:5px 12px;margin-top:0.25rem;"><i class="fa-solid fa-medal"></i> Sello Alto Rendimiento</span>` : j.sello === 'silver' ? `<span class="sello-badge silver" style="font-size:0.8rem;padding:5px 12px;margin-top:0.25rem;"><i class="fa-solid fa-shield-halved"></i> En seguimiento</span>` : ''}
+          ` : ''}
         </div>
       </div>
 
-      <div class="two-col">
-        <!-- Left Column -->
-        <div>
-          <!-- Editable Profile Card -->
-          <div class="section-card">
-            <div class="section-card-header">
-              <h3><i class="fa-solid fa-id-card"></i> Mi Pasaporte Digital</h3>
-              <button class="btn btn-sm btn-outline-accent" onclick="App.showToast('Perfil guardado (demo)', 'success')"><i class="fa-solid fa-floppy-disk"></i> Guardar cambios</button>
-            </div>
-            <div class="section-card-body">
-              <div class="profile-form-grid">
-                <div class="form-field">
-                  <label>Nombre</label>
-                  <input type="text" value="${j.nombre}" />
-                </div>
-                <div class="form-field">
-                  <label>Apellidos</label>
-                  <input type="text" value="${j.apellidos}" />
-                </div>
-                <div class="form-field">
-                  <label>Año de nacimiento</label>
-                  <input type="number" value="${j.nacimiento}" />
-                </div>
-                <div class="form-field">
-                  <label>Categoría</label>
-                  <select>
-                    ${MOCK_DATA.categorias.map(c => `<option ${c === j.categoria ? 'selected' : ''}>${c}</option>`).join('')}
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label>Posición Principal</label>
-                  <select>
-                    ${Object.keys(MOCK_DATA.posiciones).map(p => `<option ${p === j.posicionPrincipal ? 'selected' : ''}>${p}</option>`).join('')}
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label>Pierna Dominante</label>
-                  <select>
-                    <option ${j.pierna === 'Derecha' ? 'selected' : ''}>Derecha</option>
-                    <option ${j.pierna === 'Izquierda' ? 'selected' : ''}>Izquierda</option>
-                    <option ${j.pierna === 'Ambidiestro' ? 'selected' : ''}>Ambidiestro</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label>Altura (cm)</label>
-                  <input type="number" value="${j.altura}" />
-                </div>
-                <div class="form-field">
-                  <label>Peso (kg)</label>
-                  <input type="number" value="${j.peso}" />
-                </div>
-                <div class="form-field">
-                  <label>Localidad</label>
-                  <select>
-                    ${MOCK_DATA.localidades.map(l => `<option ${l === j.localidad ? 'selected' : ''}>${l}</option>`).join('')}
-                  </select>
-                </div>
-              </div>
-
-              <div style="margin-top:1.25rem">
-                <label style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);display:block;margin-bottom:0.5rem;">Posiciones Alternativas</label>
-                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-                  ${altPosHTML}
-                  <button class="btn btn-sm btn-secondary" onclick="App.showToast('Añadir posición (demo)', 'info')" style="font-size:0.7rem;padding:3px 10px;"><i class="fa-solid fa-plus"></i> Añadir</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Muro del Entrenador (readonly for player) -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-bullhorn"></i> Lo que dicen mis entrenadores</h3></div>
-            <div class="section-card-body">${coachWallHTML.length > 0 ? coachWallHTML : '<p style="color:var(--text-muted);font-size:0.85rem;">Aún no tienes comentarios de entrenadores.</p>'}</div>
-          </div>
-        </div>
-
-        <!-- Right Column -->
-        <div>
-          <!-- Sello Progress -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-trophy"></i> Progreso del Sello</h3></div>
-            <div class="section-card-body">
-              <div class="sello-progress-container">
-                <div class="sello-progress-ring">
-                  <svg width="100" height="100" viewBox="0 0 100 100">
-                    <circle class="progress-bg" cx="50" cy="50" r="42" />
-                    <circle class="progress-fill" cx="50" cy="50" r="42" stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset}" />
-                  </svg>
-                  <div class="sello-progress-center">
-                    <span class="pct">${selloPercent}%</span>
-                    <span class="pct-label">Completado</span>
+      <!-- Historial de Equipos -->
+      <div class="section-card">
+        <div class="section-card-header"><h3><i class="fa-solid fa-clock-rotate-left"></i> Historial de Equipos</h3></div>
+        <div class="section-card-body">
+          <div class="timeline">
+            ${j.historialEquipos.map(h => {
+              const cd = MOCK_DATA.getEquipoByNombre(h.equipo);
+              return `
+                <div class="timeline-item">
+                  <div class="timeline-marker"></div>
+                  <div class="timeline-content">
+                    <h4>${cd ? cd.logo : '⚽'} ${h.equipo}</h4>
+                    <p>${h.categoria} · ${h.temporadas}</p>
                   </div>
                 </div>
-                <div class="sello-progress-info">
-                  <h3>${j.sello === 'gold' ? '🏆 ¡Sello desbloqueado!' : 'Desbloquea tu Sello'}</h3>
-                  <p>${j.sello === 'gold' ? 'Tienes el Sello de Alto Rendimiento activo. Los clubes te ven como un jugador comprometido.' : 'Contrata los 3 servicios clave para desbloquear el Sello de Alto Rendimiento en tu perfil.'}</p>
-                  <ul class="sello-checklist">
-                    <li class="${j.serviciosActivos.includes('srv-1') ? 'completed' : 'not-completed'}">
-                      <i class="fa-solid ${j.serviciosActivos.includes('srv-1') ? 'fa-circle-check done' : 'fa-circle pending'}"></i>
-                      Nutrición Deportiva
-                    </li>
-                    <li class="${j.serviciosActivos.includes('srv-2') ? 'completed' : 'not-completed'}">
-                      <i class="fa-solid ${j.serviciosActivos.includes('srv-2') ? 'fa-circle-check done' : 'fa-circle pending'}"></i>
-                      Psicología del Rendimiento
-                    </li>
-                    <li class="${j.serviciosActivos.includes('srv-3') ? 'completed' : 'not-completed'}">
-                      <i class="fa-solid ${j.serviciosActivos.includes('srv-3') ? 'fa-circle-check done' : 'fa-circle pending'}"></i>
-                      Preparación Física Individual
-                    </li>
-                  </ul>
-                  ${j.sello !== 'gold' ? `<button class="btn btn-sm btn-primary" style="margin-top:0.75rem" onclick="App.showView('marketplace')"><i class="fa-solid fa-store"></i> Ir al Marketplace</button>` : ''}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Team History -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-shirt"></i> Mi trayectoria</h3></div>
-            <div class="section-card-body">
-              <div class="team-history-list">${teamHistoryHTML}</div>
-            </div>
-          </div>
-
-          <!-- Multimedia Upload -->
-          <div class="section-card">
-            <div class="section-card-header">
-              <h3><i class="fa-solid fa-photo-film"></i> Mi Multimedia</h3>
-              <button class="btn btn-sm btn-blue" onclick="App.showToast('Subir archivo (demo)', 'info')"><i class="fa-solid fa-cloud-arrow-up"></i> Subir</button>
-            </div>
-            <div class="section-card-body">
-              <div class="media-gallery">${mediaHTML}</div>
-              <div class="upload-zone" style="margin-top:1rem" onclick="App.showToast('Subir vídeo o foto (demo)', 'info')">
-                <i class="fa-solid fa-cloud-arrow-up"></i>
-                <p>Arrastra aquí tus vídeos o fotos</p>
-                <span>MP4, MOV, JPG, PNG · Máx 50MB</span>
-              </div>
-            </div>
+              `;
+            }).join('')}
           </div>
         </div>
       </div>
-    `;
-  }
 
-  // ---- Mis Estadísticas (Player Stats) ----
-  function renderPlayerStats() {
-    const j = MOCK_DATA.getJugadorById(PLAYER_ID);
-    if (!j) return;
-    const container = $('#view-p-estadisticas');
-    const mediaGol = j.stats.goles > 0 ? Math.round(j.stats.minutos / j.stats.goles) : '—';
-    const ratioTitular = j.stats.partidos > 0 ? Math.round((j.stats.titular / j.stats.partidos) * 100) : 0;
-    const minutosGolesFormatted = j.stats.minutoGolMedia.length > 0
-      ? j.stats.minutoGolMedia.map(m => `${m}'`).join(', ')
-      : 'Sin datos';
-    const mediaMinutos = j.stats.partidos > 0 ? Math.round(j.stats.minutos / j.stats.partidos) : 0;
-
-    // Build a simple bar chart representation for goals per time zone
-    const zones = { '0-15': 0, '16-30': 0, '31-45': 0, '46-60': 0, '61-75': 0, '76-90': 0 };
-    j.stats.minutoGolMedia.forEach(m => {
-      if (m <= 15) zones['0-15']++;
-      else if (m <= 30) zones['16-30']++;
-      else if (m <= 45) zones['31-45']++;
-      else if (m <= 60) zones['46-60']++;
-      else if (m <= 75) zones['61-75']++;
-      else zones['76-90']++;
-    });
-    const maxZone = Math.max(...Object.values(zones), 1);
-    const barsHTML = Object.entries(zones).map(([label, count]) => {
-      const pct = Math.round((count / maxZone) * 100);
-      return `
-        <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.4rem;">
-          <span style="width:45px;font-size:0.7rem;color:var(--text-muted);text-align:right;flex-shrink:0;">${label}'</span>
-          <div style="flex:1;height:22px;background:var(--bg-input);border-radius:4px;overflow:hidden;">
-            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--accent-secondary));border-radius:4px;display:flex;align-items:center;padding-left:6px;font-size:0.68rem;font-weight:700;color:var(--bg-primary);transition:width 0.5s ease;min-width:${count > 0 ? '20px' : '0'}">${count > 0 ? count : ''}</div>
-          </div>
-        </div>`;
-    }).join('');
-
-    container.innerHTML = `
-      <h2 class="page-title">Mis Estadísticas</h2>
-      <p class="page-subtitle">Temporada 2025/26 · ${j.historialEquipos[0]?.equipo || ''}</p>
-
-      <!-- Main Stats -->
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-icon green"><i class="fa-solid fa-futbol"></i></div>
-          <div class="stat-info"><h3>${j.stats.goles}</h3><p>Goles</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon blue"><i class="fa-solid fa-hands-helping"></i></div>
-          <div class="stat-info"><h3>${j.stats.asistencias}</h3><p>Asistencias</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon orange"><i class="fa-solid fa-gamepad"></i></div>
-          <div class="stat-info"><h3>${j.stats.partidos}</h3><p>Partidos</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon red"><i class="fa-solid fa-clock"></i></div>
-          <div class="stat-info"><h3>${j.stats.minutos}'</h3><p>Minutos Jugados</p></div>
-        </div>
-      </div>
-
-      <div class="two-col">
-        <div>
-          <!-- Detailed Stats -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-chart-bar"></i> Desglose Completo</h3></div>
-            <div class="section-card-body">
-              <div class="profile-stats-grid">
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.titular}</div><div class="stat-label">Titular</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.suplente}</div><div class="stat-label">Suplente</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${ratioTitular}%</div><div class="stat-label">% Titular</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${mediaMinutos}'</div><div class="stat-label">Min/Partido</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${mediaGol}'</div><div class="stat-label">Min/Gol</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.tarjetasAmarillas}</div><div class="stat-label">T. Amarillas</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.tarjetasRojas}</div><div class="stat-label">T. Rojas</div></div>
-                <div class="profile-stat-item"><div class="stat-val">${j.stats.goles + j.stats.asistencias}</div><div class="stat-label">G+A Total</div></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Goal minutes list -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-stopwatch"></i> Minuto de mis goles</h3></div>
-            <div class="section-card-body">
-              <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.8">${minutosGolesFormatted}</div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <!-- Goal distribution chart -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-chart-simple"></i> Distribución de goles por franja</h3></div>
-            <div class="section-card-body">
-              ${barsHTML}
-              <p style="font-size:0.72rem;color:var(--text-muted);margin-top:0.75rem;text-align:center;">Goles por franja de 15 minutos</p>
-            </div>
-          </div>
-
-          <!-- Performance Summary -->
-          <div class="section-card">
-            <div class="section-card-header"><h3><i class="fa-solid fa-ranking-star"></i> Resumen de rendimiento</h3></div>
-            <div class="section-card-body">
-              <div style="display:flex;flex-direction:column;gap:0.75rem;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border-color)">
-                  <span style="font-size:0.85rem;color:var(--text-secondary);">Goles por partido</span>
-                  <span style="font-size:1rem;font-weight:800;color:var(--accent)">${j.stats.partidos > 0 ? (j.stats.goles / j.stats.partidos).toFixed(2) : '0'}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border-color)">
-                  <span style="font-size:0.85rem;color:var(--text-secondary);">Asistencias por partido</span>
-                  <span style="font-size:1rem;font-weight:800;color:var(--accent-secondary)">${j.stats.partidos > 0 ? (j.stats.asistencias / j.stats.partidos).toFixed(2) : '0'}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border-color)">
-                  <span style="font-size:0.85rem;color:var(--text-secondary);">Participación en goles (G+A)</span>
-                  <span style="font-size:1rem;font-weight:800;color:var(--warning)">${j.stats.goles + j.stats.asistencias}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;">
-                  <span style="font-size:0.85rem;color:var(--text-secondary);">Minutos jugados por jornada</span>
-                  <span style="font-size:1rem;font-weight:800;color:var(--text-primary)">${mediaMinutos}'</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // ---- Buscar Equipos (Club directory for players) ----
-  function renderPlayerClubDirectory() {
-    const container = $('#view-p-equipos');
-    const clubs = MOCK_DATA.directorioClubes;
-
-    const clubsHTML = clubs.map(c => {
-      const needsHTML = c.necesidades.map(n => `
-        <div class="club-need-item">
-          <i class="fa-solid fa-caret-right"></i>
-          <span><strong>${n.posicion}</strong> — ${n.desc}</span>
-        </div>`).join('');
-
-      return `
-        <div class="club-card">
-          <div class="club-card-top">
-            <div class="club-logo-lg">${c.logo}</div>
-            <div class="club-card-info">
-              <h3>${c.nombre}</h3>
-              <p>${c.categoria} · ${c.localidad}</p>
-              <p style="margin-top:0.25rem;font-size:0.75rem;color:var(--text-muted)">${c.descripcion}</p>
-            </div>
-          </div>
-          <div class="club-card-needs">
-            <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:0.5px;margin-bottom:0.35rem;">Buscan:</div>
-            ${needsHTML}
-          </div>
-          <div class="club-card-bottom">
-            <div class="club-distance"><i class="fa-solid fa-location-dot"></i> ${c.distancia}</div>
-            <button class="btn btn-sm btn-blue" onclick="App.solicitarPlaza('${c.nombre}')"><i class="fa-solid fa-paper-plane"></i> Solicitar plaza</button>
-          </div>
-        </div>`;
-    }).join('');
-
-    container.innerHTML = `
-      <h2 class="page-title">Buscar Equipos</h2>
-      <p class="page-subtitle">Explora los clubes de la provincia de Jaén que tienen plazas abiertas. Envía tu solicitud directamente.</p>
-
-      <div class="stats-row" style="margin-bottom:1.5rem;">
-        <div class="stat-card">
-          <div class="stat-icon blue"><i class="fa-solid fa-shield-halved"></i></div>
-          <div class="stat-info"><h3>${clubs.length}</h3><p>Clubes con plazas</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon green"><i class="fa-solid fa-bullseye"></i></div>
-          <div class="stat-info"><h3>${clubs.reduce((sum, c) => sum + c.necesidades.length, 0)}</h3><p>Posiciones abiertas</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon orange"><i class="fa-solid fa-map-marker-alt"></i></div>
-          <div class="stat-info"><h3>Jaén</h3><p>Provincia</p></div>
-        </div>
-      </div>
-
-      <div class="club-directory-grid">${clubsHTML}</div>
-    `;
-  }
-
-  // ---- Mis Solicitudes (Player matchmaking view) ----
-  function renderPlayerSolicitudes() {
-    const container = $('#view-p-solicitudes');
-    const matches = MOCK_DATA.getMatchesByJugador(PLAYER_ID);
-
-    let matchesHTML = '';
-    if (matches.length > 0) {
-      matchesHTML = matches.map(m => {
-        const statusLabel = m.estado === 'matched' ? '✅ Match confirmado' : m.estado === 'pending' ? '⏳ Pendiente de respuesta' : '❌ Rechazado';
-        let chatHTML = '';
-        if (m.estado === 'matched' && m.mensajes.length > 0) {
-          const msgs = m.mensajes.map(msg => `<div class="chat-msg ${msg.tipo}">${msg.texto}</div>`).join('');
-          chatHTML = `
-            <div class="chat-container" style="margin-top:0.75rem;height:240px;">
-              <div class="chat-messages">${msgs}</div>
-              <div class="chat-input-bar">
-                <input type="text" placeholder="Escribe un mensaje al club..." />
-                <button onclick="App.showToast('Mensaje enviado (demo)', 'success')">Enviar</button>
-              </div>
-            </div>`;
-        }
-        return `
-          <div class="match-card">
-            <div class="match-card-header">
-              <div class="match-club-logo">${m.clubLogo}</div>
-              <div>
-                <div class="match-club-name">${m.club}</div>
-                <div class="match-club-info">${m.clubInfo}</div>
-              </div>
-            </div>
-            <div class="match-status ${m.estado}">${statusLabel}</div>
-            <div class="match-needs" style="margin-bottom:0.5rem"><strong>Lo que buscan:</strong> ${m.necesidad}</div>
-            ${m.estado === 'pending' ? '<div style="font-size:0.78rem;color:var(--text-muted);font-style:italic;"><i class="fa-solid fa-hourglass-half"></i> Esperando a que el club revise tu solicitud...</div>' : ''}
-            ${chatHTML}
-          </div>`;
-      }).join('');
-    } else {
-      matchesHTML = `
-        <div class="empty-state" style="grid-column:1/-1">
-          <i class="fa-solid fa-paper-plane"></i>
-          <h3>Sin solicitudes enviadas</h3>
-          <p>Explora el directorio de clubes y envía tu primera solicitud.</p>
-          <button class="btn btn-primary" style="margin-top:1rem" onclick="App.showView('p-equipos')"><i class="fa-solid fa-shield-halved"></i> Ver equipos</button>
-        </div>`;
-    }
-
-    const matchedCount = matches.filter(m => m.estado === 'matched').length;
-    const pendingCount = matches.filter(m => m.estado === 'pending').length;
-
-    container.innerHTML = `
-      <h2 class="page-title">Mis Solicitudes</h2>
-      <p class="page-subtitle">Gestiona tus solicitudes de plaza y chats con clubes interesados.</p>
-
-      <div class="stats-row" style="margin-bottom:1.5rem;">
-        <div class="stat-card">
-          <div class="stat-icon green"><i class="fa-solid fa-check-circle"></i></div>
-          <div class="stat-info"><h3>${matchedCount}</h3><p>Matches confirmados</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon orange"><i class="fa-solid fa-clock"></i></div>
-          <div class="stat-info"><h3>${pendingCount}</h3><p>Pendientes</p></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon blue"><i class="fa-solid fa-paper-plane"></i></div>
-          <div class="stat-info"><h3>${matches.length}</h3><p>Total enviadas</p></div>
-        </div>
-      </div>
-
-      <div class="matchmaking-grid">${matchesHTML}</div>
-    `;
-  }
-
-  // ---- Mis Servicios (Player active services) ----
-  function renderPlayerServicios() {
-    const j = MOCK_DATA.getJugadorById(PLAYER_ID);
-    if (!j) return;
-    const container = $('#view-p-servicios');
-
-    // Active services
-    let activeHTML = '';
-    if (j.serviciosActivos.length > 0) {
-      activeHTML = j.serviciosActivos.map(srvId => {
-        const srv = MOCK_DATA.servicios.find(s => s.id === srvId);
-        const info = j.serviciosInfo.find(si => si.icono === srv.icono);
-        return `
-          <div class="active-service-card">
-            <div class="active-service-icon" style="background:rgba(0,230,118,0.12);color:var(--accent);">
-              <i class="fa-solid ${srv.icono}"></i>
-            </div>
-            <div class="active-service-info">
-              <h4>${srv.nombre}</h4>
-              <p>${srv.partner}</p>
-            </div>
-            <div class="active-service-status">
-              <span class="status-active"><i class="fa-solid fa-circle" style="font-size:0.45rem;"></i> Activo</span>
-              <span class="status-duration">${info ? info.duracion : ''}</span>
-            </div>
-          </div>`;
-      }).join('');
-    } else {
-      activeHTML = `
-        <div class="empty-state">
-          <i class="fa-solid fa-star"></i>
-          <h3>Sin servicios activos</h3>
-          <p>Contrata servicios del Marketplace para mejorar tu rendimiento y desbloquear el Sello.</p>
-          <button class="btn btn-primary" style="margin-top:1rem" onclick="App.showView('marketplace')"><i class="fa-solid fa-store"></i> Ir al Marketplace</button>
-        </div>`;
-    }
-
-    // Sello progress
-    const selloServices = ['srv-1', 'srv-2', 'srv-3'];
-    const activeSelloCount = selloServices.filter(s => j.serviciosActivos.includes(s)).length;
-    const selloPercent = Math.round((activeSelloCount / selloServices.length) * 100);
-    const circumference = 2 * Math.PI * 42;
-    const dashOffset = circumference - (selloPercent / 100) * circumference;
-
-    // Recommended services (not yet contracted)
-    const recommended = MOCK_DATA.servicios.filter(s => !j.serviciosActivos.includes(s.id));
-    const recommendedHTML = recommended.slice(0, 3).map(s => `
-      <div class="service-card">
-        <div class="service-card-top">
-          <div class="service-icon ${s.iconClass}"><i class="fa-solid ${s.icono}"></i></div>
-          <div class="service-info">
-            <h3>${s.nombre}</h3>
-            <p>${s.descripcion}</p>
-            <div class="service-partner"><i class="fa-solid fa-handshake-angle"></i> ${s.partner}</div>
-          </div>
-        </div>
-        <div class="service-card-bottom">
-          <div class="service-price">${s.precio}€ <span>${s.periodo}</span></div>
-          ${s.desbloqueaSello ? `<div class="service-unlocks"><i class="fa-solid fa-lock-open"></i> Desbloquea Sello</div>` : ''}
-          <button class="btn btn-sm btn-primary" onclick="App.showToast('Servicio contratado (demo): ${s.nombre}', 'success')"><i class="fa-solid fa-cart-plus"></i> Contratar</button>
-        </div>
-      </div>
-    `).join('');
-
-    container.innerHTML = `
-      <h2 class="page-title">Mis Servicios</h2>
-      <p class="page-subtitle">Servicios que tienes activos y tu progreso hacia el Sello de Alto Rendimiento.</p>
-
-      <!-- Sello Progress -->
-      <div class="sello-progress-container" style="margin-bottom:1.5rem;">
-        <div class="sello-progress-ring">
-          <svg width="100" height="100" viewBox="0 0 100 100">
-            <circle class="progress-bg" cx="50" cy="50" r="42" />
-            <circle class="progress-fill" cx="50" cy="50" r="42" stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset}" />
-          </svg>
-          <div class="sello-progress-center">
-            <span class="pct">${selloPercent}%</span>
-            <span class="pct-label">Sello</span>
-          </div>
-        </div>
-        <div class="sello-progress-info">
-          <h3>${j.sello === 'gold' ? '🏆 ¡Sello desbloqueado!' : `${activeSelloCount}/3 servicios clave activos`}</h3>
-          <p>${j.sello === 'gold' ? 'Tu Sello de Alto Rendimiento está activo. Los clubes valoran tu compromiso.' : 'Activa nutrición, psicología y preparación física para el Sello.'}</p>
-          <ul class="sello-checklist">
-            <li class="${j.serviciosActivos.includes('srv-1') ? 'completed' : 'not-completed'}">
-              <i class="fa-solid ${j.serviciosActivos.includes('srv-1') ? 'fa-circle-check done' : 'fa-circle pending'}"></i> Nutrición
-            </li>
-            <li class="${j.serviciosActivos.includes('srv-2') ? 'completed' : 'not-completed'}">
-              <i class="fa-solid ${j.serviciosActivos.includes('srv-2') ? 'fa-circle-check done' : 'fa-circle pending'}"></i> Psicología
-            </li>
-            <li class="${j.serviciosActivos.includes('srv-3') ? 'completed' : 'not-completed'}">
-              <i class="fa-solid ${j.serviciosActivos.includes('srv-3') ? 'fa-circle-check done' : 'fa-circle pending'}"></i> Preparación Física
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- Active Services -->
-      <div class="section-card" style="margin-bottom:1.5rem">
-        <div class="section-card-header"><h3><i class="fa-solid fa-check-circle" style="color:var(--accent)"></i> Servicios Activos (${j.serviciosActivos.length})</h3></div>
-        <div class="section-card-body" style="display:flex;flex-direction:column;gap:0.75rem;">
-          ${activeHTML}
-        </div>
-      </div>
-
-      <!-- Recommended -->
-      ${recommended.length > 0 ? `
+      <!-- Muro del Entrenador -->
+      ${j.muroEntrenador.length > 0 ? `
         <div class="section-card">
-          <div class="section-card-header"><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Recomendados para ti</h3></div>
+          <div class="section-card-header"><h3><i class="fa-solid fa-chalkboard-user"></i> Muro del Entrenador</h3></div>
           <div class="section-card-body">
-            <div class="marketplace-grid">${recommendedHTML}</div>
+            ${j.muroEntrenador.map(m => `
+              <div class="coach-note">
+                <div class="coach-note-text">"${m.texto}"</div>
+                <div class="coach-note-author">— ${m.entrenador} · ${m.fecha}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Servicios Activos -->
+      ${j.serviciosInfo.length > 0 ? `
+        <div class="section-card">
+          <div class="section-card-header"><h3><i class="fa-solid fa-certificate"></i> Servicios Activos</h3></div>
+          <div class="section-card-body">
+            <div class="services-list">
+              ${j.serviciosInfo.map(s => `
+                <div class="service-chip">
+                  <i class="fa-solid ${s.icono}"></i>
+                  <span>${s.nombre}</span>
+                  <span class="service-duration">${s.duracion}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Multimedia -->
+      ${j.multimedia.length > 0 ? `
+        <div class="section-card">
+          <div class="section-card-header"><h3><i class="fa-solid fa-photo-film"></i> Multimedia</h3></div>
+          <div class="section-card-body">
+            <div class="media-grid">
+              ${j.multimedia.map(m => `
+                <div class="media-item">
+                  <i class="fa-solid ${m.icono}"></i>
+                  <span>${m.titulo}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Matches del jugador -->
+      ${matches.length > 0 ? `
+        <div class="section-card">
+          <div class="section-card-header"><h3><i class="fa-solid fa-handshake"></i> Matches</h3></div>
+          <div class="section-card-body">
+            <div class="matches-player-list">
+              ${matches.map(m => `
+                <div class="match-player-item ${m.estado}">
+                  <div class="match-player-club">
+                    <span class="match-club-logo">${m.clubLogo}</span>
+                    <div class="match-club-info">
+                      <strong>${m.club}</strong>
+                      <span>${m.clubInfo}</span>
+                    </div>
+                  </div>
+                  <div class="match-player-status">
+                    <span class="match-status-badge ${m.estado}">
+                      ${m.estado === 'matched' ? '<i class="fa-solid fa-check-circle"></i> Match' : m.estado === 'pending' ? '<i class="fa-solid fa-clock"></i> Pendiente' : '<i class="fa-solid fa-times-circle"></i> Rechazado'}
+                    </span>
+                    <span class="match-date">${m.fecha}</span>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
           </div>
         </div>
       ` : ''}
     `;
   }
 
-  // ---- Player: Solicitar Plaza ----
-  function solicitarPlaza(clubName) {
-    showToast(`Solicitud enviada a ${clubName} (demo)`, 'success');
+  function renderGoalMinutesBar(minutes) {
+    // Create 9 zones (0-10, 10-20, ..., 80-90)
+    const zones = Array(9).fill(0);
+    minutes.forEach(m => {
+      const idx = Math.min(Math.floor(m / 10), 8);
+      zones[idx]++;
+    });
+    const max = Math.max(...zones, 1);
+    return zones.map((count, i) => {
+      const h = Math.round((count / max) * 100);
+      return `
+        <div class="goal-zone">
+          <div class="goal-zone-bar" style="height:${Math.max(h, 4)}%;${count > 0 ? 'background:var(--accent);' : ''}"></div>
+          <span>${i * 10}'</span>
+        </div>
+      `;
+    }).join('');
   }
 
-  // ===================== Toast Notifications =====================
+  // ============================================================
+  //  MATCHMAKING
+  // ============================================================
+  function renderMatchmaking() {
+    const statsRow = document.getElementById('matchmaking-stats-row');
+    const grid = document.getElementById('matchmaking-grid-view');
+    if (!statsRow || !grid) return;
+
+    const all = MOCK_DATA.matchmaking;
+    const matched = all.filter(m => m.estado === 'matched').length;
+    const pending = all.filter(m => m.estado === 'pending').length;
+    const rejected = all.filter(m => m.estado === 'rejected').length;
+
+    statsRow.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-icon green"><i class="fa-solid fa-check-circle"></i></div>
+        <div class="stat-info"><h3>${matched}</h3><p>Matches confirmados</p></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon orange"><i class="fa-solid fa-clock"></i></div>
+        <div class="stat-info"><h3>${pending}</h3><p>Pendientes</p></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red"><i class="fa-solid fa-times-circle"></i></div>
+        <div class="stat-info"><h3>${rejected}</h3><p>Rechazados</p></div>
+      </div>
+    `;
+
+    // Sort: matched first, then pending, then rejected
+    const sorted = [...all].sort((a, b) => {
+      const order = { matched: 0, pending: 1, rejected: 2 };
+      return (order[a.estado] || 0) - (order[b.estado] || 0);
+    });
+
+    grid.innerHTML = sorted.map(m => {
+      const jugador = MOCK_DATA.getJugadorById(m.jugadorId);
+      if (!jugador) return '';
+
+      const posInfo = MOCK_DATA.posiciones[jugador.posicionPrincipal] || { abr: '??', color: '#666' };
+
+      const statusBadge = m.estado === 'matched'
+        ? '<span class="match-status-badge matched"><i class="fa-solid fa-check-circle"></i> Match</span>'
+        : m.estado === 'pending'
+          ? '<span class="match-status-badge pending"><i class="fa-solid fa-clock"></i> Pendiente</span>'
+          : '<span class="match-status-badge rejected"><i class="fa-solid fa-times-circle"></i> Rechazado</span>';
+
+      const chatHtml = m.mensajes.length > 0 ? `
+        <div class="match-chat">
+          <div class="match-chat-title"><i class="fa-solid fa-comments"></i> Conversación</div>
+          ${m.mensajes.map(msg => `
+            <div class="chat-msg ${msg.tipo}">
+              <div class="chat-bubble">${msg.texto}</div>
+              <div class="chat-time">${msg.tiempo}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : '';
+
+      return `
+        <div class="match-card ${m.estado}">
+          <div class="match-card-header">
+            <div class="match-jugador" onclick="App.openPlayerProfile('${jugador.id}')">
+              <div class="match-avatar">${jugador.nombre[0]}${jugador.apellidos[0]}</div>
+              <div>
+                <h4>${jugador.nombre} ${jugador.apellidos}</h4>
+                <span class="match-pos" style="background:${posInfo.color}">${posInfo.abr}</span>
+                <span>${jugador.categoria} · ${jugador.localidad}</span>
+              </div>
+            </div>
+            <div class="match-club-side">
+              <span class="match-club-logo-lg">${m.clubLogo}</span>
+              <div>
+                <strong>${m.club}</strong>
+                <span>${m.clubInfo}</span>
+              </div>
+            </div>
+          </div>
+          <div class="match-card-body">
+            <p class="match-necesidad"><i class="fa-solid fa-bullseye"></i> ${m.necesidad}</p>
+            <div class="match-meta-row">
+              ${statusBadge}
+              <span class="match-date"><i class="fa-regular fa-calendar"></i> ${m.fecha}</span>
+            </div>
+          </div>
+          ${chatHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
+  // ============================================================
+  //  MARKETPLACE
+  // ============================================================
+  function renderMarketplace() {
+    const grid = document.getElementById('marketplace-grid');
+    if (!grid) return;
+
+    grid.innerHTML = MOCK_DATA.servicios.map(s => `
+      <div class="service-card">
+        <div class="service-card-icon ${s.iconClass}">
+          <i class="fa-solid ${s.icono}"></i>
+        </div>
+        <div class="service-card-body">
+          <h3>${s.nombre}</h3>
+          <p class="service-category">${s.categoria}</p>
+          <p class="service-desc">${s.descripcion}</p>
+          <div class="service-partner"><i class="fa-solid fa-handshake-angle"></i> ${s.partner}</div>
+        </div>
+        <div class="service-card-footer">
+          <div class="service-price">${s.precio}€ <span>${s.periodo}</span></div>
+          ${s.desbloqueaSello ? '<span class="service-sello-badge"><i class="fa-solid fa-medal"></i> Desbloquea Sello</span>' : ''}
+          <button class="btn btn-primary btn-sm" onclick="App.showToast('Servicio \\\'${s.nombre}\\\' añadido. Se contactará con el partner.', 'success')">
+            <i class="fa-solid fa-cart-plus"></i> Contratar
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // ============================================================
+  //  ACTIONS
+  // ============================================================
+  function toggleAvailability(playerId) {
+    const j = MOCK_DATA.getJugadorById(playerId);
+    if (!j) return;
+    j.disponible = !j.disponible;
+    showToast(
+      j.disponible ? `${j.nombre} ${j.apellidos} ahora está disponible` : `${j.nombre} ${j.apellidos} ya no está disponible`,
+      j.disponible ? 'success' : 'info'
+    );
+    openPlayerProfile(playerId);
+    updateBadges();
+  }
+
+  function simulateMatch(playerId) {
+    const j = MOCK_DATA.getJugadorById(playerId);
+    if (!j) return;
+    showToast(`Solicitud de match enviada para ${j.nombre} ${j.apellidos}. El club será notificado.`, 'success');
+  }
+
+  // ============================================================
+  //  TOAST
+  // ============================================================
   function showToast(message, type = 'info') {
-    const container = $('#toast-container');
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
     const icons = {
       success: 'fa-check-circle',
       error: 'fa-times-circle',
       info: 'fa-info-circle',
+      warning: 'fa-exclamation-triangle',
     };
+
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `
-      <i class="fa-solid ${icons[type] || icons.info} toast-icon"></i>
-      <span class="toast-text">${message}</span>`;
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i> <span>${message}</span>`;
     container.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => toast.classList.add('show'));
+
     setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateX(100%)';
-      toast.style.transition = '0.3s ease';
+      toast.classList.remove('show');
       setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    }, 3500);
   }
 
-  // ===================== Utils =====================
-  function debounce(fn, ms) {
-    let timer;
-    return (...args) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn(...args), ms);
-    };
+  // ============================================================
+  //  HELPERS
+  // ============================================================
+  function setTextContent(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
   }
 
-  // ===================== Public API =====================
+  // ============================================================
+  //  PUBLIC API
+  // ============================================================
   return {
     init,
     showView,
@@ -1219,11 +833,10 @@ const App = (() => {
     simulateMatch,
     goBack,
     showToast,
-    switchRole,
-    solicitarPlaza,
+    logout,
   };
 
 })();
 
-// Start app when DOM ready
-document.addEventListener('DOMContentLoaded', App.init);
+// ---- Boot ----
+document.addEventListener('DOMContentLoaded', () => App.init());
