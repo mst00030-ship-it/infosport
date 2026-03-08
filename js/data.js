@@ -694,6 +694,96 @@ const MOCK_DATA = (() => {
     contacto: `info@${e.nombre.toLowerCase().replace(/\s+/g, '').replace(/[áéíóú]/g, c => ({á:'a',é:'e',í:'i',ó:'o',ú:'u'})[c])}.es`,
   }));
 
+  // ---- Scouting Alerts (Alertas Inteligentes) ----
+  const scoutingAlerts = [];
+  let alertIdCounter = 1;
+
+  function addScoutingAlert(config) {
+    const alert = {
+      id: `alert-${alertIdCounter++}`,
+      ...config,
+      createdAt: new Date().toLocaleString('es-ES'),
+      active: true,
+      triggered: false,
+    };
+    scoutingAlerts.push(alert);
+    return alert;
+  }
+
+  function removeScoutingAlert(alertId) {
+    const idx = scoutingAlerts.findIndex(a => a.id === alertId);
+    if (idx !== -1) scoutingAlerts.splice(idx, 1);
+  }
+
+  function getScoutingAlerts() { return scoutingAlerts; }
+
+  function checkScoutingAlerts() {
+    const triggered = [];
+    scoutingAlerts.forEach(alert => {
+      if (!alert.active || alert.triggered) return;
+      const results = filtrarJugadores(alert.filtros);
+      if (results.length > 0) {
+        alert.triggered = true;
+        const j = results[0];
+        const notif = {
+          id: `n-alert-${alert.id}`,
+          tipo: 'scouting-alert',
+          titulo: '🔔 Alerta de Scouting',
+          texto: `Se cumplió tu alerta "${alert.nombre}": ${j.nombre} ${j.apellidos} (${j.posicionPrincipal}) cumple los criterios.`,
+          fecha: new Date().toLocaleString('es-ES', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(',', ' ·'),
+          leida: false,
+        };
+        notificaciones.unshift(notif);
+        triggered.push({ alert, notif, jugador: j });
+      }
+    });
+    return triggered;
+  }
+
+  // ---- Radar Stats Generator (Verificado por InfoSport) ----
+  function getRadarStats(jugador) {
+    const pos = jugador.posicionPrincipal;
+    const s = jugador.stats;
+    const edad = new Date().getFullYear() - jugador.nacimiento;
+    const selloBonus = jugador.sello === 'gold' ? 8 : jugador.sello === 'silver' ? 4 : 0;
+
+    // Base stats by position archetype
+    const baseProfiles = {
+      'Portero':                 { fisico: 65, tecnica: 50, tactica: 70, velocidad: 45, defensa: 85 },
+      'Central':                 { fisico: 78, tecnica: 50, tactica: 75, velocidad: 48, defensa: 88 },
+      'Lateral Derecho':         { fisico: 72, tecnica: 60, tactica: 65, velocidad: 78, defensa: 72 },
+      'Lateral Izquierdo':       { fisico: 72, tecnica: 60, tactica: 65, velocidad: 78, defensa: 72 },
+      'Mediocentro Defensivo':   { fisico: 75, tecnica: 58, tactica: 82, velocidad: 52, defensa: 80 },
+      'Mediocentro':             { fisico: 68, tecnica: 72, tactica: 78, velocidad: 58, defensa: 62 },
+      'Interior Derecho':        { fisico: 65, tecnica: 74, tactica: 72, velocidad: 65, defensa: 55 },
+      'Interior Izquierdo':      { fisico: 65, tecnica: 74, tactica: 72, velocidad: 65, defensa: 55 },
+      'Mediapunta':              { fisico: 58, tecnica: 82, tactica: 75, velocidad: 62, defensa: 38 },
+      'Extremo Derecho':         { fisico: 60, tecnica: 78, tactica: 58, velocidad: 88, defensa: 32 },
+      'Extremo Izquierdo':       { fisico: 60, tecnica: 78, tactica: 58, velocidad: 88, defensa: 32 },
+      'Delantero Centro':        { fisico: 72, tecnica: 70, tactica: 60, velocidad: 72, defensa: 25 },
+      'Segundo Delantero':       { fisico: 65, tecnica: 75, tactica: 68, velocidad: 75, defensa: 30 },
+    };
+
+    const base = baseProfiles[pos] || { fisico: 60, tecnica: 60, tactica: 60, velocidad: 60, defensa: 60 };
+
+    // Adjust based on performance
+    const goalRatio = s.partidos > 0 ? (s.goles / s.partidos) : 0;
+    const assistRatio = s.partidos > 0 ? (s.asistencias / s.partidos) : 0;
+    const minuteRatio = s.partidos > 0 ? (s.minutos / (s.partidos * 90)) : 0;
+
+    // Use a seeded-ish variation based on player id for consistency
+    const seed = jugador.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const variation = (i) => ((seed * (i + 1) * 7) % 15) - 7;
+
+    return {
+      fisico:    Math.min(99, Math.max(25, Math.round(base.fisico + selloBonus + goalRatio * 5 + minuteRatio * 3 + variation(0)))),
+      tecnica:   Math.min(99, Math.max(25, Math.round(base.tecnica + selloBonus + assistRatio * 12 + goalRatio * 8 + variation(1)))),
+      tactica:   Math.min(99, Math.max(25, Math.round(base.tactica + selloBonus + minuteRatio * 5 + variation(2)))),
+      velocidad: Math.min(99, Math.max(25, Math.round(base.velocidad + selloBonus + (pos.includes('Extremo') ? 5 : 0) + variation(3)))),
+      defensa:   Math.min(99, Math.max(25, Math.round(base.defensa + selloBonus + (pos.includes('Central') || pos.includes('Lateral') ? 3 : 0) + variation(4)))),
+    };
+  }
+
   // ---- Helpers ----
   function getJugadorById(id) { return jugadores.find(j => j.id === id); }
   function getEquipoByNombre(nombre) { return equipos.find(e => e.nombre === nombre); }
@@ -735,8 +825,9 @@ const MOCK_DATA = (() => {
 
   return {
     localidades, equipos, posiciones, categorias, servicios, jugadores, matchmaking,
-    notificaciones, directorioClubes,
+    notificaciones, directorioClubes, scoutingAlerts,
     getJugadorById, getEquipoByNombre, filtrarJugadores, getStatsResumen, getMatchesByJugador,
+    getRadarStats, addScoutingAlert, removeScoutingAlert, getScoutingAlerts, checkScoutingAlerts,
   };
 
 })();

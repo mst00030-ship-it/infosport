@@ -10,10 +10,12 @@ const App = (() => {
   // ---- State ----
   let currentView = 'dashboard';
   let previousView = 'dashboard';
+  let viewHistory = ['dashboard'];
   let allPlayers = [];
   let filteredPlayers = [];
   let currentRole = 'director';
   let currentPlayerId = 'j-001'; // Default logged-in player
+  let favorites = JSON.parse(localStorage.getItem('infosport_favorites') || '[]');
 
   // ============================================================
   //  INIT
@@ -29,11 +31,16 @@ const App = (() => {
     bindNotifications();
     bindSettings();
     bindFilters();
+    bindSorting();
+    bindScoutingAlerts();
 
     // Render default view
     renderDashboard();
     renderScouting(filteredPlayers);
     updateBadges();
+
+    // Simulate an alert trigger after 8 seconds for demo
+    setTimeout(() => simulateAlertTrigger(), 8000);
   }
 
   // ============================================================
@@ -71,14 +78,23 @@ const App = (() => {
   }
 
   function enterApp() {
-    document.getElementById('auth-screen').style.display = 'none';
+    const authScreen = document.getElementById('auth-screen');
+    authScreen.classList.add('hidden');
+    // After transition completes, hide fully
+    setTimeout(() => {
+      authScreen.style.display = 'none';
+    }, 500);
     document.getElementById('app-layout').style.display = '';
     showToast('Sesión iniciada correctamente', 'success');
   }
 
   function logout() {
+    const authScreen = document.getElementById('auth-screen');
+    authScreen.style.display = '';
+    // Force reflow then remove hidden class
+    authScreen.offsetHeight;
+    authScreen.classList.remove('hidden');
     document.getElementById('app-layout').style.display = 'none';
-    document.getElementById('auth-screen').style.display = '';
     // Close settings if open
     document.getElementById('settings-overlay').classList.remove('open');
     showToast('Sesión cerrada', 'info');
@@ -101,6 +117,13 @@ const App = (() => {
     previousView = currentView;
     currentView = viewId;
 
+    // Push to history stack (avoid duplicates at top)
+    if (viewHistory[viewHistory.length - 1] !== viewId) {
+      viewHistory.push(viewId);
+      // Cap history at 20 entries
+      if (viewHistory.length > 20) viewHistory.shift();
+    }
+
     // Update nav items
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const navItem = document.querySelector(`.nav-item[data-view="${viewId}"]`);
@@ -113,20 +136,43 @@ const App = (() => {
 
     // Render on demand
     if (viewId === 'dashboard') renderDashboard();
-    if (viewId === 'scouting') renderScouting(filteredPlayers);
+    if (viewId === 'scouting') { renderScouting(filteredPlayers); renderScoutingAlertsList(); }
     if (viewId === 'matchmaking') renderMatchmaking();
     if (viewId === 'marketplace') renderMarketplace();
     if (viewId === 'passport') renderPassport();
     if (viewId === 'player-dashboard') renderPlayerDashboard();
     if (viewId === 'player-matches') renderPlayerMatches();
     if (viewId === 'player-services') renderPlayerServices();
+    if (viewId === 'comparador') renderComparador();
 
     // Scroll to top
-    document.querySelector('.page-content').scrollTop = 0;
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   function goBack() {
-    showView(previousView || 'dashboard');
+    // Pop current view from history
+    if (viewHistory.length > 1) {
+      viewHistory.pop();
+      const prev = viewHistory[viewHistory.length - 1];
+      // Show the view without pushing to history again
+      currentView = prev;
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      const navItem = document.querySelector(`.nav-item[data-view="${prev}"]`);
+      if (navItem) navItem.classList.add('active');
+      document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+      const viewEl = document.getElementById(`view-${prev}`);
+      if (viewEl) viewEl.classList.add('active');
+      // Re-render
+      if (prev === 'dashboard') renderDashboard();
+      if (prev === 'scouting') { renderScouting(filteredPlayers); renderScoutingAlertsList(); }
+      if (prev === 'matchmaking') renderMatchmaking();
+      if (prev === 'marketplace') renderMarketplace();
+      if (prev === 'passport') renderPassport();
+      if (prev === 'comparador') renderComparador();
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    } else {
+      showView('dashboard');
+    }
   }
 
   // ============================================================
@@ -206,6 +252,7 @@ const App = (() => {
       scouting: 'fa-binoculars',
       servicio: 'fa-store',
       sistema: 'fa-circle-info',
+      'scouting-alert': 'fa-bell',
     };
 
     const colorMap = {
@@ -213,6 +260,7 @@ const App = (() => {
       scouting: '#2196f3',
       servicio: '#ff9800',
       sistema: '#9e9e9e',
+      'scouting-alert': 'var(--accent)',
     };
 
     container.innerHTML = MOCK_DATA.notificaciones.map(n => `
@@ -282,6 +330,67 @@ const App = (() => {
         renderScouting(filteredPlayers);
       });
     }
+  }
+
+  // ============================================================
+  //  SORTING
+  // ============================================================
+  function bindSorting() {
+    const sortSelect = document.getElementById('sort-select');
+    if (sortSelect) {
+      sortSelect.addEventListener('change', () => {
+        sortPlayers(sortSelect.value);
+        renderScouting(filteredPlayers);
+      });
+    }
+  }
+
+  function sortPlayers(criteria) {
+    switch (criteria) {
+      case 'nombre':
+        filteredPlayers.sort((a, b) => `${a.nombre} ${a.apellidos}`.localeCompare(`${b.nombre} ${b.apellidos}`));
+        break;
+      case 'nombre-desc':
+        filteredPlayers.sort((a, b) => `${b.nombre} ${b.apellidos}`.localeCompare(`${a.nombre} ${a.apellidos}`));
+        break;
+      case 'goles':
+        filteredPlayers.sort((a, b) => b.stats.goles - a.stats.goles);
+        break;
+      case 'asistencias':
+        filteredPlayers.sort((a, b) => b.stats.asistencias - a.stats.asistencias);
+        break;
+      case 'partidos':
+        filteredPlayers.sort((a, b) => b.stats.partidos - a.stats.partidos);
+        break;
+      case 'edad-asc':
+        filteredPlayers.sort((a, b) => b.nacimiento - a.nacimiento);
+        break;
+      case 'edad-desc':
+        filteredPlayers.sort((a, b) => a.nacimiento - b.nacimiento);
+        break;
+    }
+  }
+
+  // ============================================================
+  //  FAVORITES / SHORTLIST
+  // ============================================================
+  function toggleFavorite(playerId) {
+    const idx = favorites.indexOf(playerId);
+    if (idx > -1) {
+      favorites.splice(idx, 1);
+      showToast('Jugador eliminado de favoritos', 'info');
+    } else {
+      favorites.push(playerId);
+      showToast('Jugador añadido a favoritos ⭐', 'success');
+    }
+    localStorage.setItem('infosport_favorites', JSON.stringify(favorites));
+    // Re-render current view to update star state
+    if (currentView === 'scouting') renderScouting(filteredPlayers);
+    if (currentView === 'dashboard') renderDashboard();
+  }
+
+  function isFavorite(playerId) {
+    return favorites.includes(playerId);
   }
 
   // ============================================================
@@ -379,6 +488,32 @@ const App = (() => {
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- Solicitar Equipo -->
+      <div class="solicitar-equipo-section">
+        <h3><i class="fa-solid fa-paper-plane"></i> Solicitar Equipo</h3>
+        <p>Envía una solicitud directa a cualquier club de la provincia. El club recibirá tu pasaporte digital y podrá contactarte.</p>
+        <div class="solicitar-equipo-form">
+          <div>
+            <span class="form-label">Club destino</span>
+            <select id="solicitar-club">
+              <option value="">Selecciona un club...</option>
+              ${MOCK_DATA.equipos.map(e => `<option value="${e.nombre}">${e.logo} ${e.nombre} — ${e.localidad}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <span class="form-label">Categoría</span>
+            <select id="solicitar-categoria">
+              <option value="">Selecciona categoría...</option>
+              ${MOCK_DATA.categorias.map(c => `<option value="${c}">${c}</option>`).join('')}
+            </select>
+          </div>
+          <textarea id="solicitar-mensaje" placeholder="Escribe un mensaje al club (opcional)... Ej: Soy delantero centro cadete, me gustaría unirme a vuestro equipo para la próxima temporada."></textarea>
+        </div>
+        <button class="btn btn-blue" onclick="App.enviarSolicitudEquipo()">
+          <i class="fa-solid fa-paper-plane"></i> Enviar Solicitud
+        </button>
       </div>
 
       <!-- Editable Form -->
@@ -618,11 +753,23 @@ const App = (() => {
     const matches = MOCK_DATA.getMatchesByJugador(j.id);
     const matchedCount = matches.filter(m => m.estado === 'matched').length;
     const pendingCount = matches.filter(m => m.estado === 'pending').length;
+    const radar = MOCK_DATA.getRadarStats(j);
+
+    // Computed stats
+    const minPorPartido = j.stats.partidos > 0 ? Math.round(j.stats.minutos / j.stats.partidos) : 0;
+    const golesPorPartido = j.stats.partidos > 0 ? (j.stats.goles / j.stats.partidos).toFixed(2) : '0.00';
+    const asisPorPartido = j.stats.partidos > 0 ? (j.stats.asistencias / j.stats.partidos).toFixed(2) : '0.00';
+    const titularPct = j.stats.partidos > 0 ? Math.round((j.stats.titular / j.stats.partidos) * 100) : 0;
+    const participacionGol = j.stats.partidos > 0 ? ((j.stats.goles + j.stats.asistencias) / j.stats.partidos).toFixed(2) : '0.00';
+    const minutosPorGol = j.stats.goles > 0 ? Math.round(j.stats.minutos / j.stats.goles) : '—';
+    const avgGoalMin = j.stats.minutoGolMedia.length > 0 ? Math.round(j.stats.minutoGolMedia.reduce((a,b) => a+b, 0) / j.stats.minutoGolMedia.length) : null;
+    const radarAvg = Math.round((radar.fisico + radar.tecnica + radar.tactica + radar.velocidad + radar.defensa) / 5);
 
     container.innerHTML = `
       <h2 class="page-title"><i class="fa-solid fa-chart-line"></i> Mis Estadísticas</h2>
-      <p class="page-subtitle">Resumen de tu rendimiento y actividad en InfoSport.</p>
+      <p class="page-subtitle">Resumen completo de tu rendimiento y actividad en InfoSport.</p>
 
+      <!-- Top stat cards -->
       <div class="stats-row">
         <div class="stat-card">
           <div class="stat-icon green"><i class="fa-solid fa-futbol"></i></div>
@@ -639,7 +786,7 @@ const App = (() => {
           </div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon orange"><i class="fa-solid fa-hands-helping"></i></div>
+          <div class="stat-icon orange"><i class="fa-solid fa-handshake-angle"></i></div>
           <div class="stat-info">
             <h3>${j.stats.asistencias}</h3>
             <p>Asistencias</p>
@@ -654,6 +801,7 @@ const App = (() => {
         </div>
       </div>
 
+      <!-- Detailed performance -->
       <div class="section-card">
         <div class="section-card-header"><h3><i class="fa-solid fa-fire"></i> Rendimiento Detallado</h3></div>
         <div class="section-card-body">
@@ -678,6 +826,114 @@ const App = (() => {
         </div>
       </div>
 
+      <!-- Advanced analytics -->
+      <div class="section-card">
+        <div class="section-card-header"><h3><i class="fa-solid fa-calculator"></i> Ratios y Métricas Avanzadas</h3></div>
+        <div class="section-card-body">
+          <div class="advanced-stats-grid">
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon"><i class="fa-solid fa-stopwatch"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${minPorPartido}'</span>
+                <span class="adv-stat-label">Min. por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill" style="width:${Math.min(100, Math.round(minPorPartido / 90 * 100))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:var(--accent)"><i class="fa-solid fa-crosshairs"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${golesPorPartido}</span>
+                <span class="adv-stat-label">Goles por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill accent" style="width:${Math.min(100, Math.round(parseFloat(golesPorPartido) * 100))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:var(--accent-secondary)"><i class="fa-solid fa-hand-point-right"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${asisPorPartido}</span>
+                <span class="adv-stat-label">Asist. por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill blue" style="width:${Math.min(100, Math.round(parseFloat(asisPorPartido) * 100))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:var(--warning)"><i class="fa-solid fa-arrows-rotate"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${participacionGol}</span>
+                <span class="adv-stat-label">G+A por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill orange" style="width:${Math.min(100, Math.round(parseFloat(participacionGol) * 50))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:#e040fb"><i class="fa-solid fa-percent"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${titularPct}%</span>
+                <span class="adv-stat-label">% Titularidad</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill purple" style="width:${titularPct}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:#ff7043"><i class="fa-solid fa-clock"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${minutosPorGol}'</span>
+                <span class="adv-stat-label">Min. por gol</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill red" style="width:${typeof minutosPorGol === 'number' ? Math.min(100, Math.round((1 - minutosPorGol / 300) * 100)) : 0}%"></div></div>
+            </div>
+            ${avgGoalMin !== null ? `
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:#26c6da"><i class="fa-solid fa-bullseye"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${avgGoalMin}'</span>
+                <span class="adv-stat-label">Media min. de gol</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill cyan" style="width:${Math.round(avgGoalMin / 90 * 100)}%"></div></div>
+            </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+
+      <!-- Goal distribution chart -->
+      ${j.stats.minutoGolMedia.length > 0 ? `
+      <div class="section-card">
+        <div class="section-card-header"><h3><i class="fa-solid fa-chart-bar"></i> Distribución de Goles</h3></div>
+        <div class="section-card-body">
+          <div class="goal-minutes-chart">
+            ${renderGoalMinutesBar(j.stats.minutoGolMedia)}
+          </div>
+        </div>
+      </div>
+      ` : ''}
+
+      <!-- Radar chart -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <h3><i class="fa-solid fa-crosshairs"></i> Radar de Habilidades</h3>
+          <span class="verified-badge"><i class="fa-solid fa-check"></i> Verificado InfoSport</span>
+        </div>
+        <div class="section-card-body">
+          <div class="player-dashboard-radar">
+            <div class="radar-chart-container">
+              ${renderRadarChart(radar)}
+            </div>
+            <div class="radar-summary">
+              <div class="radar-avg-badge">
+                <span class="radar-avg-number">${radarAvg}</span>
+                <span class="radar-avg-label">Media Global</span>
+              </div>
+              <div class="radar-labels-list">
+                <span class="radar-label-item">Físico: <span class="radar-val">${radar.fisico}</span></span>
+                <span class="radar-label-item">Técnica: <span class="radar-val">${radar.tecnica}</span></span>
+                <span class="radar-label-item">Táctica: <span class="radar-val">${radar.tactica}</span></span>
+                <span class="radar-label-item">Velocidad: <span class="radar-val">${radar.velocidad}</span></span>
+                <span class="radar-label-item">Defensa: <span class="radar-val">${radar.defensa}</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity -->
       <div class="section-card">
         <div class="section-card-header">
           <h3><i class="fa-solid fa-signal"></i> Actividad</h3>
@@ -889,6 +1145,10 @@ const App = (() => {
     const grid = document.getElementById('scouting-players-grid');
     const countEl = document.getElementById('results-count');
 
+    // Apply current sort
+    const sortSelect = document.getElementById('sort-select');
+    if (sortSelect) sortPlayers(sortSelect.value);
+
     if (countEl) {
       countEl.innerHTML = `Se encontraron <strong>${players.length}</strong> jugadores`;
     }
@@ -935,6 +1195,9 @@ const App = (() => {
               ${clubData ? clubData.logo : '⚽'} ${equipo ? equipo.equipo : 'Sin club'}
             </div>
           </div>
+          <button class="btn-fav ${isFavorite(j.id) ? 'active' : ''}" onclick="App.toggleFavorite('${j.id}'); event.stopPropagation();" title="${isFavorite(j.id) ? 'Quitar de favoritos' : 'Añadir a favoritos'}">
+            <i class="fa-${isFavorite(j.id) ? 'solid' : 'regular'} fa-star"></i>
+          </button>
           <div class="player-position" style="background:${posInfo.color}">${posInfo.abr}</div>
         </div>
         <div class="player-card-body">
@@ -991,7 +1254,7 @@ const App = (() => {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
     renderProfile(j);
-    document.querySelector('.page-content').scrollTop = 0;
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   function renderProfile(j) {
@@ -1065,11 +1328,17 @@ const App = (() => {
             <div class="stat-box"><div class="stat-value">${j.stats.suplente}</div><div class="stat-label">Suplente</div></div>
             <div class="stat-box warn"><div class="stat-value">${j.stats.tarjetasAmarillas}</div><div class="stat-label">Amarillas</div></div>
             <div class="stat-box danger"><div class="stat-value">${j.stats.tarjetasRojas}</div><div class="stat-label">Rojas</div></div>
+            ${j.stats.minutoGolMedia.length > 0 ? `
+              <div class="stat-box accent-secondary"><div class="stat-value">${Math.round(j.stats.minutoGolMedia.reduce((a,b) => a+b, 0) / j.stats.minutoGolMedia.length)}'</div><div class="stat-label">Media min. gol</div></div>
+            ` : ''}
           </div>
           ${j.stats.minutoGolMedia.length > 0 ? `
             <div class="goal-minutes">
-              <h4>Minutos de gol</h4>
-              <div class="goal-minutes-bar">
+              <div class="goal-minutes-header">
+                <h4><i class="fa-solid fa-crosshairs"></i> Distribución de goles por minuto</h4>
+                <span class="goal-minutes-total">${j.stats.minutoGolMedia.length} goles registrados</span>
+              </div>
+              <div class="goal-minutes-chart">
                 ${renderGoalMinutesBar(j.stats.minutoGolMedia)}
               </div>
             </div>
@@ -1186,15 +1455,32 @@ const App = (() => {
       zones[idx]++;
     });
     const max = Math.max(...zones, 1);
-    return zones.map((count, i) => {
-      const h = Math.round((count / max) * 100);
-      return `
-        <div class="goal-zone">
-          <div class="goal-zone-bar" style="height:${Math.max(h, 4)}%;${count > 0 ? 'background:var(--accent);' : ''}"></div>
-          <span>${i * 10}'</span>
-        </div>
-      `;
-    }).join('');
+    const avg = Math.round(minutes.reduce((a,b) => a+b, 0) / minutes.length);
+    const avgZone = Math.min(Math.floor(avg / 10), 8);
+
+    const labels = ['0-10','10-20','20-30','30-40','40-50','50-60','60-70','70-80','80-90'];
+
+    return `
+      <div class="goal-chart-wrapper">
+        ${zones.map((count, i) => {
+          const pct = Math.round((count / max) * 100);
+          const isAvgZone = i === avgZone;
+          const barClass = count > 0 ? (isAvgZone ? 'active avg-zone' : 'active') : '';
+          return `
+            <div class="goal-chart-col">
+              <span class="goal-chart-value">${count > 0 ? count : ''}</span>
+              <div class="goal-chart-bar-track">
+                <div class="goal-chart-bar ${barClass}" style="height:${Math.max(pct, 3)}%"></div>
+              </div>
+              <span class="goal-chart-label">${labels[i]}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <div class="goal-chart-avg-line">
+        <i class="fa-solid fa-bullseye"></i> Media de gol: <strong>minuto ${avg}'</strong>
+      </div>
+    `;
   }
 
   // ============================================================
@@ -1338,6 +1624,493 @@ const App = (() => {
   }
 
   // ============================================================
+  //  SOLICITAR EQUIPO (Passport view)
+  // ============================================================
+  function enviarSolicitudEquipo() {
+    const clubSelect = document.getElementById('solicitar-club');
+    const catSelect = document.getElementById('solicitar-categoria');
+    const mensajeArea = document.getElementById('solicitar-mensaje');
+
+    const club = clubSelect ? clubSelect.value : '';
+    const categoria = catSelect ? catSelect.value : '';
+    const mensaje = mensajeArea ? mensajeArea.value.trim() : '';
+
+    if (!club) {
+      showToast('Selecciona un club para enviar la solicitud.', 'warning');
+      return;
+    }
+    if (!categoria) {
+      showToast('Selecciona una categoría.', 'warning');
+      return;
+    }
+
+    const j = MOCK_DATA.getJugadorById(currentPlayerId);
+    if (!j) return;
+
+    // Add a mock notification
+    const notif = {
+      id: `n-sol-${Date.now()}`,
+      tipo: 'match',
+      titulo: 'Solicitud enviada',
+      texto: `${j.nombre} ${j.apellidos} ha enviado una solicitud a ${club} (${categoria}).`,
+      fecha: new Date().toLocaleString('es-ES', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(',', ' ·'),
+      leida: false,
+    };
+    MOCK_DATA.notificaciones.unshift(notif);
+    renderNotificationsList();
+
+    showToast(`Solicitud enviada a ${club}. ¡El club revisará tu pasaporte digital!`, 'success');
+
+    // Reset form
+    if (clubSelect) clubSelect.value = '';
+    if (catSelect) catSelect.value = '';
+    if (mensajeArea) mensajeArea.value = '';
+  }
+
+  // ============================================================
+  //  COMPARADOR (CARA A CARA)
+  // ============================================================
+  function renderComparador() {
+    const container = document.getElementById('view-comparador');
+    if (!container) return;
+
+    const playerOptions = allPlayers.map(j => {
+      const eq = j.historialEquipos[0];
+      return `<option value="${j.id}">${j.nombre} ${j.apellidos} — ${j.posicionPrincipal} (${eq ? eq.equipo : 'Sin club'})</option>`;
+    }).join('');
+
+    container.innerHTML = `
+      <h2 class="page-title"><i class="fa-solid fa-scale-balanced"></i> Cara a Cara</h2>
+      <p class="page-subtitle">Compara dos jugadores lado a lado. Selecciona jugadores para ver su perfil, estadísticas y radar verificado por InfoSport.</p>
+
+      <div class="comparador-container">
+        <div class="comparador-selectors">
+          <div class="comparador-select-card">
+            <label><i class="fa-solid fa-user"></i> Jugador 1</label>
+            <select id="comp-player-1">
+              <option value="">Selecciona jugador...</option>
+              ${playerOptions}
+            </select>
+          </div>
+          <div class="comparador-vs">VS</div>
+          <div class="comparador-select-card">
+            <label><i class="fa-solid fa-user"></i> Jugador 2</label>
+            <select id="comp-player-2">
+              <option value="">Selecciona jugador...</option>
+              ${playerOptions}
+            </select>
+          </div>
+        </div>
+
+        <div class="comparador-split" id="comparador-split">
+          <div class="comparador-column empty-col">
+            <div class="empty-text">
+              <i class="fa-solid fa-user"></i>
+              <p>Selecciona el primer jugador</p>
+            </div>
+          </div>
+          <div class="comparador-column empty-col">
+            <div class="empty-text">
+              <i class="fa-solid fa-user"></i>
+              <p>Selecciona el segundo jugador</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Bind selection events
+    const sel1 = document.getElementById('comp-player-1');
+    const sel2 = document.getElementById('comp-player-2');
+    if (sel1) sel1.addEventListener('change', updateComparador);
+    if (sel2) sel2.addEventListener('change', updateComparador);
+  }
+
+  function updateComparador() {
+    const id1 = document.getElementById('comp-player-1')?.value;
+    const id2 = document.getElementById('comp-player-2')?.value;
+    const split = document.getElementById('comparador-split');
+    if (!split) return;
+
+    const col1 = id1 ? renderComparadorColumn(id1) : renderEmptyColumn('Selecciona el primer jugador');
+    const col2 = id2 ? renderComparadorColumn(id2) : renderEmptyColumn('Selecciona el segundo jugador');
+
+    split.innerHTML = col1 + col2;
+  }
+
+  function renderEmptyColumn(text) {
+    return `
+      <div class="comparador-column empty-col">
+        <div class="empty-text">
+          <i class="fa-solid fa-user"></i>
+          <p>${text}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderComparadorColumn(playerId) {
+    const j = MOCK_DATA.getJugadorById(playerId);
+    if (!j) return renderEmptyColumn('Jugador no encontrado');
+
+    const posInfo = MOCK_DATA.posiciones[j.posicionPrincipal] || { abr: '??', color: '#666' };
+    const edad = new Date().getFullYear() - j.nacimiento;
+    const equipo = j.historialEquipos[0];
+    const clubData = equipo ? MOCK_DATA.getEquipoByNombre(equipo.equipo) : null;
+    const iniciales = `${j.nombre[0]}${j.apellidos[0]}`;
+    const radar = MOCK_DATA.getRadarStats(j);
+
+    // Availability badge
+    let availBadge;
+    if (j.disponible) {
+      const hasContract = j.historialEquipos[0]?.temporadas?.includes('Actual');
+      if (hasContract) {
+        availBadge = '<span class="availability-badge contrato"><i class="fa-solid fa-file-contract"></i> Con Contrato</span>';
+      } else {
+        availBadge = '<span class="availability-badge libre"><i class="fa-solid fa-unlock"></i> Agente Libre</span>';
+      }
+    } else {
+      availBadge = '<span class="availability-badge no-disponible"><i class="fa-solid fa-lock"></i> No Disponible</span>';
+    }
+
+    // Sello badge
+    const sellos = {
+      gold: '<span class="sello gold"><i class="fa-solid fa-medal"></i> Alto Rendimiento</span>',
+      silver: '<span class="sello silver"><i class="fa-solid fa-eye"></i> En seguimiento</span>',
+      none: '',
+    };
+
+    return `
+      <div class="comparador-column">
+        <div class="comparador-player-header">
+          <div class="comp-avatar">${iniciales}</div>
+          <div class="comp-info">
+            <h3>${j.nombre} ${j.apellidos}</h3>
+            <div class="comp-club">${clubData ? clubData.logo : '⚽'} ${equipo ? equipo.equipo : 'Sin club'}</div>
+            <span class="comp-position" style="background:${posInfo.color}">${j.posicionPrincipal}</span>
+          </div>
+        </div>
+
+        <div class="comparador-badge-row">
+          ${availBadge}
+          ${sellos[j.sello] || ''}
+          <span style="font-size:0.72rem;color:var(--text-muted);margin-left:auto;">
+            <i class="fa-solid fa-calendar"></i> ${edad} años · ${j.localidad}
+          </span>
+        </div>
+
+        <div class="comparador-stats-section">
+          <h4><i class="fa-solid fa-chart-bar"></i> Estadísticas</h4>
+          <div class="comparador-stats-grid">
+            <div class="comp-stat-item"><div class="comp-stat-val">${j.stats.partidos}</div><div class="comp-stat-lbl">PJ</div></div>
+            <div class="comp-stat-item"><div class="comp-stat-val" style="color:var(--accent)">${j.stats.goles}</div><div class="comp-stat-lbl">Goles</div></div>
+            <div class="comp-stat-item"><div class="comp-stat-val">${j.stats.asistencias}</div><div class="comp-stat-lbl">Asist.</div></div>
+            <div class="comp-stat-item"><div class="comp-stat-val">${j.stats.minutos}'</div><div class="comp-stat-lbl">Min.</div></div>
+          </div>
+        </div>
+
+        <div class="radar-section">
+          <h4><i class="fa-solid fa-crosshairs"></i> Radar <span class="verified-badge"><i class="fa-solid fa-check"></i> Verificado InfoSport</span></h4>
+          <div class="radar-chart-container">
+            ${renderRadarChart(radar)}
+          </div>
+          <div class="radar-labels-list">
+            <span class="radar-label-item">Físico: <span class="radar-val">${radar.fisico}</span></span>
+            <span class="radar-label-item">Técnica: <span class="radar-val">${radar.tecnica}</span></span>
+            <span class="radar-label-item">Táctica: <span class="radar-val">${radar.tactica}</span></span>
+            <span class="radar-label-item">Velocidad: <span class="radar-val">${radar.velocidad}</span></span>
+            <span class="radar-label-item">Defensa: <span class="radar-val">${radar.defensa}</span></span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ============================================================
+  //  RADAR CHART (SVG Spider/Web Chart)
+  // ============================================================
+  function renderRadarChart(stats) {
+    const labels = ['Físico', 'Técnica', 'Táctica', 'Velocidad', 'Defensa'];
+    const values = [stats.fisico, stats.tecnica, stats.tactica, stats.velocidad, stats.defensa];
+    const n = labels.length;
+    const cx = 140, cy = 140, maxR = 110;
+    const angleStep = (2 * Math.PI) / n;
+    const startAngle = -Math.PI / 2; // Start at top
+
+    // Generate grid rings
+    const rings = [0.2, 0.4, 0.6, 0.8, 1.0];
+    let gridLines = '';
+    rings.forEach(pct => {
+      const r = maxR * pct;
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const angle = startAngle + i * angleStep;
+        pts.push(`${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`);
+      }
+      gridLines += `<polygon points="${pts.join(' ')}" fill="none" stroke="rgba(50,235,100,0.08)" stroke-width="1"/>`;
+    });
+
+    // Axis lines
+    let axisLines = '';
+    for (let i = 0; i < n; i++) {
+      const angle = startAngle + i * angleStep;
+      const x2 = cx + maxR * Math.cos(angle);
+      const y2 = cy + maxR * Math.sin(angle);
+      axisLines += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="rgba(50,235,100,0.12)" stroke-width="1"/>`;
+    }
+
+    // Data polygon
+    const dataPoints = [];
+    for (let i = 0; i < n; i++) {
+      const angle = startAngle + i * angleStep;
+      const r = (values[i] / 100) * maxR;
+      dataPoints.push(`${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`);
+    }
+
+    // Labels
+    let labelTexts = '';
+    for (let i = 0; i < n; i++) {
+      const angle = startAngle + i * angleStep;
+      const lx = cx + (maxR + 22) * Math.cos(angle);
+      const ly = cy + (maxR + 22) * Math.sin(angle);
+      const anchor = Math.abs(Math.cos(angle)) < 0.01 ? 'middle' :
+                     Math.cos(angle) > 0 ? 'start' : 'end';
+      labelTexts += `<text x="${lx}" y="${ly + 4}" text-anchor="${anchor}" fill="#8b95b0" font-size="10" font-family="Rajdhani, sans-serif" font-weight="600">${labels[i]}</text>`;
+    }
+
+    // Value dots
+    let dots = '';
+    for (let i = 0; i < n; i++) {
+      const angle = startAngle + i * angleStep;
+      const r = (values[i] / 100) * maxR;
+      const dx = cx + r * Math.cos(angle);
+      const dy = cy + r * Math.sin(angle);
+      dots += `<circle cx="${dx}" cy="${dy}" r="4" fill="#32eb64" stroke="#000" stroke-width="1.5"/>`;
+    }
+
+    return `
+      <svg viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+        ${gridLines}
+        ${axisLines}
+        <polygon points="${dataPoints.join(' ')}" fill="rgba(50,235,100,0.15)" stroke="#32eb64" stroke-width="2" stroke-linejoin="round"/>
+        ${dots}
+        ${labelTexts}
+      </svg>
+    `;
+  }
+
+  // ============================================================
+  //  SCOUTING ALERTS
+  // ============================================================
+  function bindScoutingAlerts() {
+    const btn = document.getElementById('btn-create-alert');
+    if (btn) {
+      btn.addEventListener('click', () => openAlertCreationModal());
+    }
+
+    // Pre-populate a demo alert
+    MOCK_DATA.addScoutingAlert({
+      nombre: 'Lateral Izquierdo Sub-23 Agente Libre',
+      descripcion: 'Avisar cuando un Lateral Izquierdo Sub-23 cambie su estado a Agente Libre',
+      filtros: {
+        posicion: 'Lateral Izquierdo',
+        edadMax: '23',
+        disponible: true,
+      },
+    });
+  }
+
+  function openAlertCreationModal() {
+    const overlay = document.getElementById('modal-overlay');
+    const title = document.getElementById('modal-title');
+    const body = document.getElementById('modal-body');
+    const footer = document.querySelector('#modal-overlay .modal-footer');
+
+    if (!overlay || !body) return;
+
+    title.textContent = 'Crear Alerta de Scouting';
+
+    body.innerHTML = `
+      <div class="alert-form">
+        <div class="form-group">
+          <label>Nombre de la alerta</label>
+          <input type="text" id="alert-nombre" placeholder="Ej: Delantero Sub-20 disponible" />
+        </div>
+        <div class="form-group">
+          <label>Posición</label>
+          <select id="alert-posicion">
+            <option value="">Cualquier posición</option>
+            ${Object.keys(MOCK_DATA.posiciones).map(p => `<option value="${p}">${p}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Categoría</label>
+          <select id="alert-categoria">
+            <option value="">Cualquier categoría</option>
+            ${MOCK_DATA.categorias.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Edad máxima</label>
+          <input type="number" id="alert-edad-max" placeholder="Ej: 23" min="10" max="40" />
+        </div>
+        <div class="form-group">
+          <label>Condición de activación</label>
+          <select id="alert-condicion">
+            <option value="disponible">Cambio a Disponible / Agente Libre</option>
+            <option value="gold">Obtiene Sello Alto Rendimiento</option>
+            <option value="any">Cualquier nuevo registro</option>
+          </select>
+        </div>
+        <div class="alert-preview" id="alert-preview">
+          <i class="fa-solid fa-bell"></i> Configura los parámetros para ver la vista previa de tu alerta.
+        </div>
+      </div>
+    `;
+
+    footer.innerHTML = `
+      <button class="btn btn-secondary" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
+      <button class="btn btn-blue" onclick="App.saveScoutingAlert()"><i class="fa-solid fa-bell"></i> Guardar Alerta</button>
+    `;
+
+    overlay.classList.add('active');
+
+    // Bind preview update
+    ['alert-nombre', 'alert-posicion', 'alert-categoria', 'alert-edad-max', 'alert-condicion'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', updateAlertPreview);
+      if (el) el.addEventListener('change', updateAlertPreview);
+    });
+  }
+
+  function updateAlertPreview() {
+    const preview = document.getElementById('alert-preview');
+    if (!preview) return;
+
+    const nombre = document.getElementById('alert-nombre')?.value || 'Sin nombre';
+    const posicion = document.getElementById('alert-posicion')?.value || 'cualquier posición';
+    const categoria = document.getElementById('alert-categoria')?.value || 'cualquier categoría';
+    const edadMax = document.getElementById('alert-edad-max')?.value || '';
+    const condicion = document.getElementById('alert-condicion')?.value || 'disponible';
+
+    const condicionText = condicion === 'disponible' ? 'cambie a Disponible' :
+                          condicion === 'gold' ? 'obtenga Sello Alto Rendimiento' : 'se registre';
+
+    const edadText = edadMax ? ` Sub-${edadMax}` : '';
+
+    preview.innerHTML = `
+      <i class="fa-solid fa-bell"></i> <strong>"${nombre}"</strong><br>
+      Avisar cuando un <strong>${posicion}${edadText}</strong> de <strong>${categoria}</strong> ${condicionText}.
+    `;
+  }
+
+  function saveScoutingAlert() {
+    const nombre = document.getElementById('alert-nombre')?.value?.trim();
+    const posicion = document.getElementById('alert-posicion')?.value || '';
+    const categoria = document.getElementById('alert-categoria')?.value || '';
+    const edadMax = document.getElementById('alert-edad-max')?.value || '';
+    const condicion = document.getElementById('alert-condicion')?.value || 'disponible';
+
+    if (!nombre) {
+      showToast('Asigna un nombre a la alerta.', 'warning');
+      return;
+    }
+
+    const filtros = {};
+    if (posicion) filtros.posicion = posicion;
+    if (categoria) filtros.categoria = categoria;
+    if (edadMax) filtros.edadMax = edadMax;
+    if (condicion === 'disponible') filtros.disponible = true;
+    if (condicion === 'gold') filtros.sello = 'gold';
+
+    const condicionText = condicion === 'disponible' ? 'cambie a Disponible' :
+                          condicion === 'gold' ? 'obtenga Sello Alto Rendimiento' : 'se registre';
+    const edadText = edadMax ? ` Sub-${edadMax}` : '';
+
+    MOCK_DATA.addScoutingAlert({
+      nombre,
+      descripcion: `Avisar cuando un ${posicion || 'jugador'}${edadText} de ${categoria || 'cualquier categoría'} ${condicionText}.`,
+      filtros,
+    });
+
+    document.getElementById('modal-overlay').classList.remove('active');
+    showToast(`Alerta "${nombre}" creada correctamente. Te notificaremos cuando se cumpla la condición.`, 'success');
+
+    renderScoutingAlertsList();
+  }
+
+  function renderScoutingAlertsList() {
+    const container = document.getElementById('scouting-alerts-container');
+    if (!container) return;
+
+    const alerts = MOCK_DATA.getScoutingAlerts();
+    if (alerts.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="section-card">
+        <div class="section-card-header">
+          <h3><i class="fa-solid fa-bell"></i> Alertas de Scouting Activas</h3>
+          <span style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-heading);letter-spacing:0.5px;">${alerts.length} alerta${alerts.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="section-card-body">
+          <div class="scouting-alerts-list">
+            ${alerts.map(a => `
+              <div class="scouting-alert-card">
+                <div class="alert-icon ${a.triggered ? 'triggered' : ''}">
+                  <i class="fa-solid ${a.triggered ? 'fa-bell' : 'fa-satellite-dish'}"></i>
+                </div>
+                <div class="alert-content">
+                  <div class="alert-name">${a.nombre}</div>
+                  <div class="alert-desc">${a.descripcion}</div>
+                </div>
+                <div class="alert-actions">
+                  <span class="alert-status ${a.triggered ? 'triggered-alert' : 'active-alert'}">
+                    ${a.triggered ? '<i class="fa-solid fa-check"></i> Activada' : '<i class="fa-solid fa-satellite-dish"></i> Vigilando'}
+                  </span>
+                  <button class="btn btn-sm btn-secondary" onclick="App.deleteScoutingAlert('${a.id}')" title="Eliminar">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function deleteScoutingAlert(alertId) {
+    MOCK_DATA.removeScoutingAlert(alertId);
+    renderScoutingAlertsList();
+    showToast('Alerta eliminada.', 'info');
+  }
+
+  function simulateAlertTrigger() {
+    const triggered = MOCK_DATA.checkScoutingAlerts();
+    if (triggered.length > 0) {
+      // Re-render notifications
+      renderNotificationsList();
+
+      // Show notification dot
+      const dot = document.querySelector('.notif-dot');
+      if (dot) dot.style.display = '';
+
+      // Show toast for each triggered alert
+      triggered.forEach(t => {
+        showToast(`🔔 Alerta "${t.alert.nombre}" activada: ${t.jugador.nombre} ${t.jugador.apellidos} cumple los criterios.`, 'success');
+      });
+
+      // Re-render alerts list if viewing scouting
+      if (currentView === 'scouting') {
+        renderScoutingAlertsList();
+      }
+    }
+  }
+
+  // ============================================================
   //  TOAST
   // ============================================================
   function showToast(message, type = 'info') {
@@ -1387,6 +2160,10 @@ const App = (() => {
     goBack,
     showToast,
     logout,
+    enviarSolicitudEquipo,
+    saveScoutingAlert,
+    deleteScoutingAlert,
+    toggleFavorite,
   };
 
 })();

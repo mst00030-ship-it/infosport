@@ -117,6 +117,11 @@
           <span class="nav-badge" id="nav-badge-scouting">35</span>
         </div>
 
+        <div class="nav-item" data-view="comparador">
+          <i class="fa-solid fa-scale-balanced"></i>
+          <span>Cara a Cara</span>
+        </div>
+
         <div class="nav-section-label">Conexiones</div>
         <div class="nav-item" data-view="matchmaking">
           <i class="fa-solid fa-handshake"></i>
@@ -355,7 +360,8 @@
               <label>Edad máxima</label>
               <input type="number" id="filter-edad-max" placeholder="35" min="8" max="40" />
             </div>
-            <div class="filter-group" style="display:flex;align-items:flex-end;gap:0.5rem;padding-bottom:0.15rem;">
+            <div class="filter-group filter-group-toggle">
+              <label class="filter-toggle-label">Disponibilidad</label>
               <label class="toggle-switch">
                 <input type="checkbox" id="filter-disponible" />
                 <span class="toggle-slider"></span>
@@ -366,14 +372,35 @@
           <div class="filter-actions">
             <button class="btn btn-primary" id="btn-filter-search"><i class="fa-solid fa-magnifying-glass"></i> Buscar</button>
             <button class="btn btn-secondary" id="btn-filter-reset"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
+            <button class="btn btn-blue" id="btn-create-alert"><i class="fa-solid fa-bell"></i> Crear Alerta de Scouting</button>
           </div>
         </div>
 
+        <!-- Active Scouting Alerts -->
+        <div id="scouting-alerts-container" style="margin-bottom:1.25rem;"></div>
+
         <div class="results-info">
           <div class="results-count" id="results-count">Se encontraron <strong>0</strong> jugadores</div>
+          <div class="results-actions">
+            <div class="sort-control">
+              <label for="sort-select"><i class="fa-solid fa-arrow-down-short-wide"></i></label>
+              <select id="sort-select">
+                <option value="nombre">Nombre (A-Z)</option>
+                <option value="nombre-desc">Nombre (Z-A)</option>
+                <option value="goles" selected>Más goles</option>
+                <option value="asistencias">Más asistencias</option>
+                <option value="partidos">Más partidos</option>
+                <option value="edad-asc">Edad (menor)</option>
+                <option value="edad-desc">Edad (mayor)</option>
+              </select>
+            </div>
+          </div>
         </div>
         <div class="players-grid" id="scouting-players-grid"></div>
       </section>
+
+      <!-- ========== COMPARADOR (CARA A CARA) VIEW ========== -->
+      <section class="view-section" id="view-comparador"></section>
 
       <!-- ========== PROFILE VIEW ========== -->
       <section class="view-section" id="view-profile"></section>
@@ -553,7 +580,7 @@
         <div class="settings-item">
           <div class="settings-item-info">
             <i class="fa-solid fa-envelope"></i>
-            <div><div class="item-label">Correo electrónico</div><div class="item-desc">direccion@realjean.es</div></div>
+            <div><div class="item-label">Correo electrónico</div><div class="item-desc">direccion@realjaen.es</div></div>
           </div>
           <div class="settings-item-action"><i class="fa-solid fa-chevron-right"></i></div>
         </div>
@@ -669,7 +696,7 @@
             <i class="fa-solid fa-scale-balanced"></i>
             <div><div class="item-label">Aviso legal</div><div class="item-desc">Privacidad, copyright y condiciones</div></div>
           </div>
-          <div class="settings-item-action"><i class="fa-solid fa-chevron-right" onclick="App.showView('legal'); document.getElementById('settings-overlay').classList.remove('open');"></i></div>
+          <div class="settings-item-action" onclick="App.showView('legal'); document.getElementById('settings-overlay').classList.remove('open');"><i class="fa-solid fa-chevron-right"></i></div>
         </div>
       </div>
 
@@ -680,7 +707,7 @@
             <i class="fa-solid fa-right-from-bracket" style="color:var(--danger)"></i>
             <div><div class="item-label" style="color:var(--danger)">Cerrar sesión</div><div class="item-desc">Salir de tu cuenta de InfoSport</div></div>
           </div>
-          <div class="settings-item-action"><i class="fa-solid fa-chevron-right" style="color:var(--danger)" onclick="App.logout()"></i></div>
+          <div class="settings-item-action" onclick="App.logout()" style="cursor:pointer;"><i class="fa-solid fa-chevron-right" style="color:var(--danger)"></i></div>
         </div>
       </div>
     </div>
