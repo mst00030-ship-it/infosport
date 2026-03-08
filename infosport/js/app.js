@@ -10,10 +10,12 @@ const App = (() => {
   // ---- State ----
   let currentView = 'dashboard';
   let previousView = 'dashboard';
+  let viewHistory = ['dashboard'];
   let allPlayers = [];
   let filteredPlayers = [];
   let currentRole = 'director';
   let currentPlayerId = 'j-001'; // Default logged-in player
+  let favorites = JSON.parse(localStorage.getItem('infosport_favorites') || '[]');
 
   // ============================================================
   //  INIT
@@ -29,6 +31,7 @@ const App = (() => {
     bindNotifications();
     bindSettings();
     bindFilters();
+    bindSorting();
     bindScoutingAlerts();
 
     // Render default view
@@ -75,14 +78,23 @@ const App = (() => {
   }
 
   function enterApp() {
-    document.getElementById('auth-screen').style.display = 'none';
+    const authScreen = document.getElementById('auth-screen');
+    authScreen.classList.add('hidden');
+    // After transition completes, hide fully
+    setTimeout(() => {
+      authScreen.style.display = 'none';
+    }, 500);
     document.getElementById('app-layout').style.display = '';
     showToast('Sesión iniciada correctamente', 'success');
   }
 
   function logout() {
+    const authScreen = document.getElementById('auth-screen');
+    authScreen.style.display = '';
+    // Force reflow then remove hidden class
+    authScreen.offsetHeight;
+    authScreen.classList.remove('hidden');
     document.getElementById('app-layout').style.display = 'none';
-    document.getElementById('auth-screen').style.display = '';
     // Close settings if open
     document.getElementById('settings-overlay').classList.remove('open');
     showToast('Sesión cerrada', 'info');
@@ -104,6 +116,13 @@ const App = (() => {
   function showView(viewId) {
     previousView = currentView;
     currentView = viewId;
+
+    // Push to history stack (avoid duplicates at top)
+    if (viewHistory[viewHistory.length - 1] !== viewId) {
+      viewHistory.push(viewId);
+      // Cap history at 20 entries
+      if (viewHistory.length > 20) viewHistory.shift();
+    }
 
     // Update nav items
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -127,11 +146,33 @@ const App = (() => {
     if (viewId === 'comparador') renderComparador();
 
     // Scroll to top
-    document.querySelector('.page-content').scrollTop = 0;
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   function goBack() {
-    showView(previousView || 'dashboard');
+    // Pop current view from history
+    if (viewHistory.length > 1) {
+      viewHistory.pop();
+      const prev = viewHistory[viewHistory.length - 1];
+      // Show the view without pushing to history again
+      currentView = prev;
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      const navItem = document.querySelector(`.nav-item[data-view="${prev}"]`);
+      if (navItem) navItem.classList.add('active');
+      document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+      const viewEl = document.getElementById(`view-${prev}`);
+      if (viewEl) viewEl.classList.add('active');
+      // Re-render
+      if (prev === 'dashboard') renderDashboard();
+      if (prev === 'scouting') { renderScouting(filteredPlayers); renderScoutingAlertsList(); }
+      if (prev === 'matchmaking') renderMatchmaking();
+      if (prev === 'marketplace') renderMarketplace();
+      if (prev === 'passport') renderPassport();
+      if (prev === 'comparador') renderComparador();
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    } else {
+      showView('dashboard');
+    }
   }
 
   // ============================================================
@@ -289,6 +330,67 @@ const App = (() => {
         renderScouting(filteredPlayers);
       });
     }
+  }
+
+  // ============================================================
+  //  SORTING
+  // ============================================================
+  function bindSorting() {
+    const sortSelect = document.getElementById('sort-select');
+    if (sortSelect) {
+      sortSelect.addEventListener('change', () => {
+        sortPlayers(sortSelect.value);
+        renderScouting(filteredPlayers);
+      });
+    }
+  }
+
+  function sortPlayers(criteria) {
+    switch (criteria) {
+      case 'nombre':
+        filteredPlayers.sort((a, b) => `${a.nombre} ${a.apellidos}`.localeCompare(`${b.nombre} ${b.apellidos}`));
+        break;
+      case 'nombre-desc':
+        filteredPlayers.sort((a, b) => `${b.nombre} ${b.apellidos}`.localeCompare(`${a.nombre} ${a.apellidos}`));
+        break;
+      case 'goles':
+        filteredPlayers.sort((a, b) => b.stats.goles - a.stats.goles);
+        break;
+      case 'asistencias':
+        filteredPlayers.sort((a, b) => b.stats.asistencias - a.stats.asistencias);
+        break;
+      case 'partidos':
+        filteredPlayers.sort((a, b) => b.stats.partidos - a.stats.partidos);
+        break;
+      case 'edad-asc':
+        filteredPlayers.sort((a, b) => b.nacimiento - a.nacimiento);
+        break;
+      case 'edad-desc':
+        filteredPlayers.sort((a, b) => a.nacimiento - b.nacimiento);
+        break;
+    }
+  }
+
+  // ============================================================
+  //  FAVORITES / SHORTLIST
+  // ============================================================
+  function toggleFavorite(playerId) {
+    const idx = favorites.indexOf(playerId);
+    if (idx > -1) {
+      favorites.splice(idx, 1);
+      showToast('Jugador eliminado de favoritos', 'info');
+    } else {
+      favorites.push(playerId);
+      showToast('Jugador añadido a favoritos ⭐', 'success');
+    }
+    localStorage.setItem('infosport_favorites', JSON.stringify(favorites));
+    // Re-render current view to update star state
+    if (currentView === 'scouting') renderScouting(filteredPlayers);
+    if (currentView === 'dashboard') renderDashboard();
+  }
+
+  function isFavorite(playerId) {
+    return favorites.includes(playerId);
   }
 
   // ============================================================
@@ -651,11 +753,23 @@ const App = (() => {
     const matches = MOCK_DATA.getMatchesByJugador(j.id);
     const matchedCount = matches.filter(m => m.estado === 'matched').length;
     const pendingCount = matches.filter(m => m.estado === 'pending').length;
+    const radar = MOCK_DATA.getRadarStats(j);
+
+    // Computed stats
+    const minPorPartido = j.stats.partidos > 0 ? Math.round(j.stats.minutos / j.stats.partidos) : 0;
+    const golesPorPartido = j.stats.partidos > 0 ? (j.stats.goles / j.stats.partidos).toFixed(2) : '0.00';
+    const asisPorPartido = j.stats.partidos > 0 ? (j.stats.asistencias / j.stats.partidos).toFixed(2) : '0.00';
+    const titularPct = j.stats.partidos > 0 ? Math.round((j.stats.titular / j.stats.partidos) * 100) : 0;
+    const participacionGol = j.stats.partidos > 0 ? ((j.stats.goles + j.stats.asistencias) / j.stats.partidos).toFixed(2) : '0.00';
+    const minutosPorGol = j.stats.goles > 0 ? Math.round(j.stats.minutos / j.stats.goles) : '—';
+    const avgGoalMin = j.stats.minutoGolMedia.length > 0 ? Math.round(j.stats.minutoGolMedia.reduce((a,b) => a+b, 0) / j.stats.minutoGolMedia.length) : null;
+    const radarAvg = Math.round((radar.fisico + radar.tecnica + radar.tactica + radar.velocidad + radar.defensa) / 5);
 
     container.innerHTML = `
       <h2 class="page-title"><i class="fa-solid fa-chart-line"></i> Mis Estadísticas</h2>
-      <p class="page-subtitle">Resumen de tu rendimiento y actividad en InfoSport.</p>
+      <p class="page-subtitle">Resumen completo de tu rendimiento y actividad en InfoSport.</p>
 
+      <!-- Top stat cards -->
       <div class="stats-row">
         <div class="stat-card">
           <div class="stat-icon green"><i class="fa-solid fa-futbol"></i></div>
@@ -672,7 +786,7 @@ const App = (() => {
           </div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon orange"><i class="fa-solid fa-hands-helping"></i></div>
+          <div class="stat-icon orange"><i class="fa-solid fa-handshake-angle"></i></div>
           <div class="stat-info">
             <h3>${j.stats.asistencias}</h3>
             <p>Asistencias</p>
@@ -687,6 +801,7 @@ const App = (() => {
         </div>
       </div>
 
+      <!-- Detailed performance -->
       <div class="section-card">
         <div class="section-card-header"><h3><i class="fa-solid fa-fire"></i> Rendimiento Detallado</h3></div>
         <div class="section-card-body">
@@ -711,6 +826,114 @@ const App = (() => {
         </div>
       </div>
 
+      <!-- Advanced analytics -->
+      <div class="section-card">
+        <div class="section-card-header"><h3><i class="fa-solid fa-calculator"></i> Ratios y Métricas Avanzadas</h3></div>
+        <div class="section-card-body">
+          <div class="advanced-stats-grid">
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon"><i class="fa-solid fa-stopwatch"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${minPorPartido}'</span>
+                <span class="adv-stat-label">Min. por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill" style="width:${Math.min(100, Math.round(minPorPartido / 90 * 100))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:var(--accent)"><i class="fa-solid fa-crosshairs"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${golesPorPartido}</span>
+                <span class="adv-stat-label">Goles por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill accent" style="width:${Math.min(100, Math.round(parseFloat(golesPorPartido) * 100))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:var(--accent-secondary)"><i class="fa-solid fa-hand-point-right"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${asisPorPartido}</span>
+                <span class="adv-stat-label">Asist. por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill blue" style="width:${Math.min(100, Math.round(parseFloat(asisPorPartido) * 100))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:var(--warning)"><i class="fa-solid fa-arrows-rotate"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${participacionGol}</span>
+                <span class="adv-stat-label">G+A por partido</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill orange" style="width:${Math.min(100, Math.round(parseFloat(participacionGol) * 50))}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:#e040fb"><i class="fa-solid fa-percent"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${titularPct}%</span>
+                <span class="adv-stat-label">% Titularidad</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill purple" style="width:${titularPct}%"></div></div>
+            </div>
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:#ff7043"><i class="fa-solid fa-clock"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${minutosPorGol}'</span>
+                <span class="adv-stat-label">Min. por gol</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill red" style="width:${typeof minutosPorGol === 'number' ? Math.min(100, Math.round((1 - minutosPorGol / 300) * 100)) : 0}%"></div></div>
+            </div>
+            ${avgGoalMin !== null ? `
+            <div class="adv-stat-item">
+              <div class="adv-stat-icon" style="color:#26c6da"><i class="fa-solid fa-bullseye"></i></div>
+              <div class="adv-stat-data">
+                <span class="adv-stat-value">${avgGoalMin}'</span>
+                <span class="adv-stat-label">Media min. de gol</span>
+              </div>
+              <div class="adv-stat-bar"><div class="adv-stat-bar-fill cyan" style="width:${Math.round(avgGoalMin / 90 * 100)}%"></div></div>
+            </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+
+      <!-- Goal distribution chart -->
+      ${j.stats.minutoGolMedia.length > 0 ? `
+      <div class="section-card">
+        <div class="section-card-header"><h3><i class="fa-solid fa-chart-bar"></i> Distribución de Goles</h3></div>
+        <div class="section-card-body">
+          <div class="goal-minutes-chart">
+            ${renderGoalMinutesBar(j.stats.minutoGolMedia)}
+          </div>
+        </div>
+      </div>
+      ` : ''}
+
+      <!-- Radar chart -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <h3><i class="fa-solid fa-crosshairs"></i> Radar de Habilidades</h3>
+          <span class="verified-badge"><i class="fa-solid fa-check"></i> Verificado InfoSport</span>
+        </div>
+        <div class="section-card-body">
+          <div class="player-dashboard-radar">
+            <div class="radar-chart-container">
+              ${renderRadarChart(radar)}
+            </div>
+            <div class="radar-summary">
+              <div class="radar-avg-badge">
+                <span class="radar-avg-number">${radarAvg}</span>
+                <span class="radar-avg-label">Media Global</span>
+              </div>
+              <div class="radar-labels-list">
+                <span class="radar-label-item">Físico: <span class="radar-val">${radar.fisico}</span></span>
+                <span class="radar-label-item">Técnica: <span class="radar-val">${radar.tecnica}</span></span>
+                <span class="radar-label-item">Táctica: <span class="radar-val">${radar.tactica}</span></span>
+                <span class="radar-label-item">Velocidad: <span class="radar-val">${radar.velocidad}</span></span>
+                <span class="radar-label-item">Defensa: <span class="radar-val">${radar.defensa}</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity -->
       <div class="section-card">
         <div class="section-card-header">
           <h3><i class="fa-solid fa-signal"></i> Actividad</h3>
@@ -922,6 +1145,10 @@ const App = (() => {
     const grid = document.getElementById('scouting-players-grid');
     const countEl = document.getElementById('results-count');
 
+    // Apply current sort
+    const sortSelect = document.getElementById('sort-select');
+    if (sortSelect) sortPlayers(sortSelect.value);
+
     if (countEl) {
       countEl.innerHTML = `Se encontraron <strong>${players.length}</strong> jugadores`;
     }
@@ -968,6 +1195,9 @@ const App = (() => {
               ${clubData ? clubData.logo : '⚽'} ${equipo ? equipo.equipo : 'Sin club'}
             </div>
           </div>
+          <button class="btn-fav ${isFavorite(j.id) ? 'active' : ''}" onclick="App.toggleFavorite('${j.id}'); event.stopPropagation();" title="${isFavorite(j.id) ? 'Quitar de favoritos' : 'Añadir a favoritos'}">
+            <i class="fa-${isFavorite(j.id) ? 'solid' : 'regular'} fa-star"></i>
+          </button>
           <div class="player-position" style="background:${posInfo.color}">${posInfo.abr}</div>
         </div>
         <div class="player-card-body">
@@ -1024,7 +1254,7 @@ const App = (() => {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
     renderProfile(j);
-    document.querySelector('.page-content').scrollTop = 0;
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   function renderProfile(j) {
@@ -1098,11 +1328,17 @@ const App = (() => {
             <div class="stat-box"><div class="stat-value">${j.stats.suplente}</div><div class="stat-label">Suplente</div></div>
             <div class="stat-box warn"><div class="stat-value">${j.stats.tarjetasAmarillas}</div><div class="stat-label">Amarillas</div></div>
             <div class="stat-box danger"><div class="stat-value">${j.stats.tarjetasRojas}</div><div class="stat-label">Rojas</div></div>
+            ${j.stats.minutoGolMedia.length > 0 ? `
+              <div class="stat-box accent-secondary"><div class="stat-value">${Math.round(j.stats.minutoGolMedia.reduce((a,b) => a+b, 0) / j.stats.minutoGolMedia.length)}'</div><div class="stat-label">Media min. gol</div></div>
+            ` : ''}
           </div>
           ${j.stats.minutoGolMedia.length > 0 ? `
             <div class="goal-minutes">
-              <h4>Minutos de gol</h4>
-              <div class="goal-minutes-bar">
+              <div class="goal-minutes-header">
+                <h4><i class="fa-solid fa-crosshairs"></i> Distribución de goles por minuto</h4>
+                <span class="goal-minutes-total">${j.stats.minutoGolMedia.length} goles registrados</span>
+              </div>
+              <div class="goal-minutes-chart">
                 ${renderGoalMinutesBar(j.stats.minutoGolMedia)}
               </div>
             </div>
@@ -1219,15 +1455,32 @@ const App = (() => {
       zones[idx]++;
     });
     const max = Math.max(...zones, 1);
-    return zones.map((count, i) => {
-      const h = Math.round((count / max) * 100);
-      return `
-        <div class="goal-zone">
-          <div class="goal-zone-bar" style="height:${Math.max(h, 4)}%;${count > 0 ? 'background:var(--accent);' : ''}"></div>
-          <span>${i * 10}'</span>
-        </div>
-      `;
-    }).join('');
+    const avg = Math.round(minutes.reduce((a,b) => a+b, 0) / minutes.length);
+    const avgZone = Math.min(Math.floor(avg / 10), 8);
+
+    const labels = ['0-10','10-20','20-30','30-40','40-50','50-60','60-70','70-80','80-90'];
+
+    return `
+      <div class="goal-chart-wrapper">
+        ${zones.map((count, i) => {
+          const pct = Math.round((count / max) * 100);
+          const isAvgZone = i === avgZone;
+          const barClass = count > 0 ? (isAvgZone ? 'active avg-zone' : 'active') : '';
+          return `
+            <div class="goal-chart-col">
+              <span class="goal-chart-value">${count > 0 ? count : ''}</span>
+              <div class="goal-chart-bar-track">
+                <div class="goal-chart-bar ${barClass}" style="height:${Math.max(pct, 3)}%"></div>
+              </div>
+              <span class="goal-chart-label">${labels[i]}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <div class="goal-chart-avg-line">
+        <i class="fa-solid fa-bullseye"></i> Media de gol: <strong>minuto ${avg}'</strong>
+      </div>
+    `;
   }
 
   // ============================================================
@@ -1557,7 +1810,7 @@ const App = (() => {
         </div>
 
         <div class="radar-section">
-          <h4><i class="fa-solid fa-spider"></i> Radar <span class="verified-badge"><i class="fa-solid fa-check"></i> Verificado InfoSport</span></h4>
+          <h4><i class="fa-solid fa-crosshairs"></i> Radar <span class="verified-badge"><i class="fa-solid fa-check"></i> Verificado InfoSport</span></h4>
           <div class="radar-chart-container">
             ${renderRadarChart(radar)}
           </div>
@@ -1807,7 +2060,7 @@ const App = (() => {
             ${alerts.map(a => `
               <div class="scouting-alert-card">
                 <div class="alert-icon ${a.triggered ? 'triggered' : ''}">
-                  <i class="fa-solid ${a.triggered ? 'fa-bell' : 'fa-radar'}"></i>
+                  <i class="fa-solid ${a.triggered ? 'fa-bell' : 'fa-satellite-dish'}"></i>
                 </div>
                 <div class="alert-content">
                   <div class="alert-name">${a.nombre}</div>
@@ -1815,7 +2068,7 @@ const App = (() => {
                 </div>
                 <div class="alert-actions">
                   <span class="alert-status ${a.triggered ? 'triggered-alert' : 'active-alert'}">
-                    ${a.triggered ? '<i class="fa-solid fa-check"></i> Activada' : '<i class="fa-solid fa-radar"></i> Vigilando'}
+                    ${a.triggered ? '<i class="fa-solid fa-check"></i> Activada' : '<i class="fa-solid fa-satellite-dish"></i> Vigilando'}
                   </span>
                   <button class="btn btn-sm btn-secondary" onclick="App.deleteScoutingAlert('${a.id}')" title="Eliminar">
                     <i class="fa-solid fa-trash"></i>
@@ -1910,6 +2163,7 @@ const App = (() => {
     enviarSolicitudEquipo,
     saveScoutingAlert,
     deleteScoutingAlert,
+    toggleFavorite,
   };
 
 })();
